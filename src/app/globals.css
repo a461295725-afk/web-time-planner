@@ -1,26 +1,90 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
+@theme {
+  --color-bg-primary: #0b0b0c;
+  --color-bg-secondary: #101115;
+  --color-card: #17181d;
+  --color-card-border: #292c34;
+  --color-accent-green: #9cff6d;
+  --color-accent-purple: #a5b4fc;
+  --color-text-primary: #f4f4f5;
+  --color-text-secondary: #a1a1aa;
+  --color-text-muted: #71717a;
+  --font-sans: -apple-system, BlinkMacSystemFont, "PingFang SC", "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "SFMono-Regular", "SF Mono", Menlo, Consolas, monospace;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+html,
+body {
+  background-color: var(--color-bg-primary);
+  color: #f4f4f5;
+  font-family: var(--font-sans, Arial, Helvetica, sans-serif);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+html[data-theme="ocean"] {
+  --color-bg-primary: #071014;
+  --color-bg-secondary: #0b171d;
+  --color-card: #102229;
+  --color-card-border: #203840;
+  --color-accent-green: #54e6d1;
+  --color-accent-purple: #69a8ff;
+  --color-text-primary: #edfafa;
+  --color-text-secondary: #9abdc2;
+  --color-text-muted: #60828a;
+}
+
+html[data-theme="amber"] {
+  --color-bg-primary: #100c09;
+  --color-bg-secondary: #18120e;
+  --color-card: #231b15;
+  --color-card-border: #3c3026;
+  --color-accent-green: #ffcb68;
+  --color-accent-purple: #ff8e68;
+  --color-text-primary: #fff5e8;
+  --color-text-secondary: #cdb8a0;
+  --color-text-muted: #887663;
+}
+
+html[data-theme="rose"] {
+  --color-bg-primary: #100a11;
+  --color-bg-secondary: #180f1a;
+  --color-card: #221625;
+  --color-card-border: #3d2941;
+  --color-accent-green: #ff6fae;
+  --color-accent-purple: #c79bff;
+  --color-text-primary: #fff1f7;
+  --color-text-secondary: #c7abc6;
+  --color-text-muted: #896f8a;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background-image:
+    radial-gradient(circle at 52% 0%, rgba(156, 255, 109, 0.06), transparent 33rem),
+    radial-gradient(circle at 82% 16%, rgba(165, 180, 252, 0.06), transparent 25rem);
+}
+
+html[data-theme="ocean"] body {
+  background-image:
+    radial-gradient(circle at 52% 0%, rgba(84, 230, 209, 0.08), transparent 33rem),
+    radial-gradient(circle at 82% 16%, rgba(105, 168, 255, 0.07), transparent 25rem);
+}
+
+html[data-theme="amber"] body {
+  background-image:
+    radial-gradient(circle at 52% 0%, rgba(255, 203, 104, 0.08), transparent 33rem),
+    radial-gradient(circle at 82% 16%, rgba(255, 142, 104, 0.07), transparent 25rem);
+}
+
+html[data-theme="rose"] body {
+  background-image:
+    radial-gradient(circle at 52% 0%, rgba(255, 111, 174, 0.08), transparent 33rem),
+    radial-gradient(circle at 82% 16%, rgba(199, 155, 255, 0.07), transparent 25rem);
+}
+
+button {
+  cursor: pointer;
+}
+
+::selection {
+  background-color: rgba(156, 255, 109, 0.26);
 }

@@ -1,36 +1,35 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Time Planner
 
-## Getting Started
+面向家庭场景、支持双人独立使用的个人暗色事项工作台。
 
-First, run the development server:
+## 本地运行
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm install
+npm run dev           # http://localhost:3000
+npm run db:init       # 显式初始化数据库
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+首次访问会自动跳转到 `/setup` 创建管理员账号。
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## 部署
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```bash
+# 生成 .env
+echo 'AI_API_KEY=your-key' > .env
 
-## Learn More
+# 启动
+docker compose up -d --build    # http://localhost:3080
+```
 
-To learn more about Next.js, take a look at the following resources:
+数据持久化在 `./data/time-planner.db`，重启不丢失。
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## 技术栈
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+Next.js 16 (App Router) + React + TypeScript + Tailwind CSS v4 + Framer Motion + Lucide React + SQLite (better-sqlite3 + Drizzle)。
 
-## Deploy on Vercel
+## 文档
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- `CLAUDE.md` — 协作说明、路由清单、数据模型
+- `docs/server-ai-settings.md` — AI 密钥配置
+- `docs/hermes-api.md` — 外部 API 文档（含 Token）
