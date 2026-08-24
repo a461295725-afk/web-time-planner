@@ -30,6 +30,23 @@ export async function POST(request: Request) {
       return Response.json({ error: `${field} 日期无效` }, { status: 400 });
     }
   }
+  if (
+    input.estimatedMinutes !== undefined &&
+    input.estimatedMinutes !== null &&
+    (!Number.isInteger(input.estimatedMinutes) || input.estimatedMinutes < 5 || input.estimatedMinutes > 1440)
+  ) {
+    return Response.json({ error: "预计时长必须是 5 到 1440 分钟的整数" }, { status: 400 });
+  }
+  if (input.energyLevel !== undefined && input.energyLevel !== null && !["low", "medium", "high"].includes(input.energyLevel)) {
+    return Response.json({ error: "精力等级无效" }, { status: 400 });
+  }
+  if (
+    input.preferredPeriod !== undefined &&
+    input.preferredPeriod !== null &&
+    !["morning", "afternoon", "evening", "anytime"].includes(input.preferredPeriod)
+  ) {
+    return Response.json({ error: "偏好时段无效" }, { status: 400 });
+  }
   return Response.json(createTask(auth.userId, input), { status: 201 });
 }
 
@@ -47,6 +64,23 @@ export async function PATCH(request: Request) {
     if (input[field] !== undefined && input[field] !== null && input[field] !== "" && !isDateKey(input[field])) {
       return Response.json({ error: `${field} 日期无效` }, { status: 400 });
     }
+  }
+  if (
+    input.estimatedMinutes !== undefined &&
+    input.estimatedMinutes !== null &&
+    (!Number.isInteger(input.estimatedMinutes) || input.estimatedMinutes < 5 || input.estimatedMinutes > 1440)
+  ) {
+    return Response.json({ error: "预计时长必须是 5 到 1440 分钟的整数" }, { status: 400 });
+  }
+  if (input.energyLevel !== undefined && input.energyLevel !== null && !["low", "medium", "high"].includes(input.energyLevel)) {
+    return Response.json({ error: "精力等级无效" }, { status: 400 });
+  }
+  if (
+    input.preferredPeriod !== undefined &&
+    input.preferredPeriod !== null &&
+    !["morning", "afternoon", "evening", "anytime"].includes(input.preferredPeriod)
+  ) {
+    return Response.json({ error: "偏好时段无效" }, { status: 400 });
   }
   const task = updateTask(auth.userId, input.id, input);
   return task

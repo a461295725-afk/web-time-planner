@@ -4,7 +4,7 @@ import { hashHermesToken, hermesTokenLast4 } from "@/lib/hermes-token";
 
 type SqliteDatabase = Database.Database;
 
-const CURRENT_VERSION = 6;
+const CURRENT_VERSION = 7;
 
 function tableColumns(sqlite: SqliteDatabase, table: string): string[] {
   return (sqlite.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).map(
@@ -108,6 +108,10 @@ function createBaseTables(sqlite: SqliteDatabase): void {
       show_in_week_plan INTEGER NOT NULL DEFAULT 0,
       sort_order INTEGER NOT NULL DEFAULT 0,
       today_sort_order INTEGER NOT NULL DEFAULT 0,
+      estimated_minutes INTEGER,
+      energy_level TEXT,
+      preferred_period TEXT,
+      completed_at INTEGER,
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL
     );
@@ -177,6 +181,98 @@ function createBaseTables(sqlite: SqliteDatabase): void {
       token_hash TEXT NOT NULL UNIQUE,
       token_last4 TEXT NOT NULL,
       created_at INTEGER NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS day_plans (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id),
+      date TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'draft' CHECK(status IN ('draft', 'confirmed', 'rejected')),
+      source TEXT NOT NULL DEFAULT 'rules' CHECK(source IN ('rules', 'ai', 'manual')),
+      version INTEGER NOT NULL DEFAULT 1,
+      summary TEXT NOT NULL DEFAULT '',
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      confirmed_at INTEGER,
+      UNIQUE(user_id, date)
+    );
+    CREATE TABLE IF NOT EXISTS day_plan_items (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id),
+      plan_id TEXT NOT NULL REFERENCES day_plans(id) ON DELETE CASCADE,
+      task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+      status TEXT NOT NULL DEFAULT 'proposed' CHECK(status IN ('proposed', 'accepted', 'rejected')),
+      block TEXT NOT NULL CHECK(block IN ('morning', 'afternoon', 'evening')),
+      start_minute INTEGER NOT NULL,
+      end_minute INTEGER NOT NULL,
+      position INTEGER NOT NULL DEFAULT 0,
+      reason TEXT NOT NULL DEFAULT '',
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      UNIQUE(plan_id, task_id)
+    );
+    CREATE TABLE IF NOT EXISTS focus_sessions (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id),
+      task_id TEXT REFERENCES tasks(id) ON DELETE SET NULL,
+      plan_item_id TEXT REFERENCES day_plan_items(id) ON DELETE SET NULL,
+      date TEXT NOT NULL,
+      started_at INTEGER NOT NULL,
+      ended_at INTEGER,
+      duration_seconds INTEGER,
+      status TEXT NOT NULL DEFAULT 'running' CHECK(status IN ('running', 'completed', 'cancelled')),
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS planning_feedback_events (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id),
+      plan_id TEXT,
+      task_id TEXT,
+      date TEXT NOT NULL,
+      event_type TEXT NOT NULL,
+      payload_json TEXT NOT NULL DEFAULT '{}',
+      created_at INTEGER NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS reviews (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id),
+      period_type TEXT NOT NULL CHECK(period_type IN ('daily', 'weekly')),
+      period_start TEXT NOT NULL,
+      period_end TEXT NOT NULL,
+      wins TEXT NOT NULL DEFAULT '',
+      blockers TEXT NOT NULL DEFAULT '',
+      next_action TEXT NOT NULL DEFAULT '',
+      notes TEXT NOT NULL DEFAULT '',
+      metrics_json TEXT NOT NULL DEFAULT '{}',
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      UNIQUE(user_id, period_type, period_start)
+    );
+    CREATE TABLE IF NOT EXISTS task_carryovers (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id),
+      task_id TEXT NOT NULL,
+      source_date TEXT NOT NULL,
+      target_date TEXT NOT NULL,
+      action TEXT NOT NULL CHECK(action IN ('move_next_day', 'return_to_week')),
+      created_at INTEGER NOT NULL,
+      UNIQUE(user_id, task_id, source_date, target_date)
+    );
+    CREATE TABLE IF NOT EXISTS agent_memories (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id),
+      category TEXT NOT NULL CHECK(category IN ('explicit', 'preference', 'behavior', 'context')),
+      key TEXT NOT NULL,
+      value_json TEXT NOT NULL,
+      source TEXT NOT NULL CHECK(source IN ('user', 'inferred', 'system')),
+      evidence_count INTEGER NOT NULL DEFAULT 1,
+      confidence REAL NOT NULL DEFAULT 1,
+      confirmed INTEGER NOT NULL DEFAULT 0,
+      last_evidence_at INTEGER NOT NULL,
+      expires_at INTEGER,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      UNIQUE(user_id, category, key)
     );
   `);
 }
@@ -305,6 +401,116 @@ function ensureLegacyHermesTable(sqlite: SqliteDatabase): void {
   migrateLegacyHermesTokens(sqlite);
 }
 
+function createV3PlanningTables(sqlite: SqliteDatabase): void {
+  addColumn(sqlite, "tasks", "estimated_minutes", "INTEGER");
+  addColumn(sqlite, "tasks", "energy_level", "TEXT");
+  addColumn(sqlite, "tasks", "preferred_period", "TEXT");
+  addColumn(sqlite, "tasks", "completed_at", "INTEGER");
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS day_plans (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id),
+      date TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'draft' CHECK(status IN ('draft', 'confirmed', 'rejected')),
+      source TEXT NOT NULL DEFAULT 'rules' CHECK(source IN ('rules', 'ai', 'manual')),
+      version INTEGER NOT NULL DEFAULT 1,
+      summary TEXT NOT NULL DEFAULT '',
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      confirmed_at INTEGER,
+      UNIQUE(user_id, date)
+    );
+    CREATE TABLE IF NOT EXISTS day_plan_items (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id),
+      plan_id TEXT NOT NULL REFERENCES day_plans(id) ON DELETE CASCADE,
+      task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+      status TEXT NOT NULL DEFAULT 'proposed' CHECK(status IN ('proposed', 'accepted', 'rejected')),
+      block TEXT NOT NULL CHECK(block IN ('morning', 'afternoon', 'evening')),
+      start_minute INTEGER NOT NULL,
+      end_minute INTEGER NOT NULL,
+      position INTEGER NOT NULL DEFAULT 0,
+      reason TEXT NOT NULL DEFAULT '',
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      UNIQUE(plan_id, task_id)
+    );
+    CREATE TABLE IF NOT EXISTS focus_sessions (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id),
+      task_id TEXT REFERENCES tasks(id) ON DELETE SET NULL,
+      plan_item_id TEXT REFERENCES day_plan_items(id) ON DELETE SET NULL,
+      date TEXT NOT NULL,
+      started_at INTEGER NOT NULL,
+      ended_at INTEGER,
+      duration_seconds INTEGER,
+      status TEXT NOT NULL DEFAULT 'running' CHECK(status IN ('running', 'completed', 'cancelled')),
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS planning_feedback_events (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id),
+      plan_id TEXT,
+      task_id TEXT,
+      date TEXT NOT NULL,
+      event_type TEXT NOT NULL,
+      payload_json TEXT NOT NULL DEFAULT '{}',
+      created_at INTEGER NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS reviews (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id),
+      period_type TEXT NOT NULL CHECK(period_type IN ('daily', 'weekly')),
+      period_start TEXT NOT NULL,
+      period_end TEXT NOT NULL,
+      wins TEXT NOT NULL DEFAULT '',
+      blockers TEXT NOT NULL DEFAULT '',
+      next_action TEXT NOT NULL DEFAULT '',
+      notes TEXT NOT NULL DEFAULT '',
+      metrics_json TEXT NOT NULL DEFAULT '{}',
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      UNIQUE(user_id, period_type, period_start)
+    );
+    CREATE TABLE IF NOT EXISTS task_carryovers (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id),
+      task_id TEXT NOT NULL,
+      source_date TEXT NOT NULL,
+      target_date TEXT NOT NULL,
+      action TEXT NOT NULL CHECK(action IN ('move_next_day', 'return_to_week')),
+      created_at INTEGER NOT NULL,
+      UNIQUE(user_id, task_id, source_date, target_date)
+    );
+    CREATE TABLE IF NOT EXISTS agent_memories (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id),
+      category TEXT NOT NULL CHECK(category IN ('explicit', 'preference', 'behavior', 'context')),
+      key TEXT NOT NULL,
+      value_json TEXT NOT NULL,
+      source TEXT NOT NULL CHECK(source IN ('user', 'inferred', 'system')),
+      evidence_count INTEGER NOT NULL DEFAULT 1,
+      confidence REAL NOT NULL DEFAULT 1,
+      confirmed INTEGER NOT NULL DEFAULT 0,
+      last_evidence_at INTEGER NOT NULL,
+      expires_at INTEGER,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      UNIQUE(user_id, category, key)
+    );
+    CREATE INDEX IF NOT EXISTS idx_day_plans_user_date ON day_plans(user_id, date);
+    CREATE INDEX IF NOT EXISTS idx_day_plan_items_plan_position ON day_plan_items(plan_id, position);
+    CREATE INDEX IF NOT EXISTS idx_focus_sessions_user_date ON focus_sessions(user_id, date);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_focus_sessions_one_running
+      ON focus_sessions(user_id) WHERE status = 'running';
+    CREATE INDEX IF NOT EXISTS idx_feedback_user_date ON planning_feedback_events(user_id, date, created_at);
+    CREATE INDEX IF NOT EXISTS idx_reviews_user_period ON reviews(user_id, period_type, period_start);
+    CREATE INDEX IF NOT EXISTS idx_carryovers_user_source ON task_carryovers(user_id, source_date);
+    CREATE INDEX IF NOT EXISTS idx_agent_memories_user_active ON agent_memories(user_id, category, expires_at);
+  `);
+}
+
 function applyMigration(sqlite: SqliteDatabase, version: number): void {
   switch (version) {
     case 1: createBaseTables(sqlite); break;
@@ -313,6 +519,7 @@ function applyMigration(sqlite: SqliteDatabase, version: number): void {
     case 4: createIndexes(sqlite); break;
     case 5: migrateLegacyHermesTokens(sqlite); break;
     case 6: ensureLegacyHermesTable(sqlite); break;
+    case 7: createV3PlanningTables(sqlite); break;
     default: throw new Error(`未知数据库迁移版本：${version}`);
   }
 }

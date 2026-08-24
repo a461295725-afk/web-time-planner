@@ -23,6 +23,10 @@ export interface TaskItem {
   showInWeekPlan?: boolean;
   sortOrder?: number;
   todaySortOrder?: number;
+  estimatedMinutes?: number;
+  energyLevel?: "low" | "medium" | "high";
+  preferredPeriod?: "morning" | "afternoon" | "evening" | "anytime";
+  completedAt?: number;
 }
 
 export interface ProjectItem {

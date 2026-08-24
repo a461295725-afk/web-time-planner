@@ -40,6 +40,10 @@ type TaskRow = {
   show_in_week_plan: number;
   sort_order: number;
   today_sort_order: number;
+  estimated_minutes: number | null;
+  energy_level: TaskItem["energyLevel"] | null;
+  preferred_period: TaskItem["preferredPeriod"] | null;
+  completed_at: number | null;
 };
 
 type ProjectRow = {
@@ -79,7 +83,7 @@ function requiredDate(value: string, field: string): string {
 }
 
 function nullableDate(value: string | null | undefined, field: string): string | null {
-  if (value === undefined || value === null || value === "") return null;
+  if (value === undefined || value === null) return null;
   return requiredDate(value, field);
 }
 
@@ -90,6 +94,32 @@ function requiredPriority(
   const next = value ?? fallback;
   if (!isPriority(next)) invalid("优先级无效");
   return next;
+}
+
+function nullableEstimatedMinutes(value: number | null | undefined): number | null {
+  if (value === undefined || value === null) return null;
+  if (!Number.isInteger(value) || value < 5 || value > 1440) {
+    invalid("预计时长必须是 5 到 1440 分钟的整数");
+  }
+  return value;
+}
+
+function nullableEnergyLevel(
+  value: TaskItem["energyLevel"] | null | undefined
+): TaskItem["energyLevel"] | null {
+  if (value === undefined || value === null) return null;
+  if (!["low", "medium", "high"].includes(value)) invalid("精力等级无效");
+  return value;
+}
+
+function nullablePreferredPeriod(
+  value: TaskItem["preferredPeriod"] | null | undefined
+): TaskItem["preferredPeriod"] | null {
+  if (value === undefined || value === null) return null;
+  if (!["morning", "afternoon", "evening", "anytime"].includes(value)) {
+    invalid("偏好时段无效");
+  }
+  return value;
 }
 
 function settingsMap(userId: string): Map<string, string> {
@@ -290,6 +320,10 @@ function mapTask(row: TaskRow): TaskItem {
     showInWeekPlan: Boolean(row.show_in_week_plan),
     sortOrder: row.sort_order,
     todaySortOrder: row.today_sort_order,
+    estimatedMinutes: row.estimated_minutes ?? undefined,
+    energyLevel: row.energy_level ?? undefined,
+    preferredPeriod: row.preferred_period ?? undefined,
+    completedAt: row.completed_at ?? undefined,
   };
 }
 
@@ -310,7 +344,8 @@ function taskRow(userId: string, id: string): TaskRow | undefined {
   return sqlite
     .prepare(
       `SELECT id, title, description, priority, status, due_date, scheduled_date,
-        project_id, show_in_week_plan, sort_order, today_sort_order
+        project_id, show_in_week_plan, sort_order, today_sort_order,
+        estimated_minutes, energy_level, preferred_period, completed_at
        FROM tasks WHERE id = ? AND user_id = ?`
     )
     .get(id, userId) as TaskRow | undefined;
@@ -320,7 +355,8 @@ export function getTasks(userId: string): TaskItem[] {
   const rows = sqlite
     .prepare(
       `SELECT id, title, description, priority, status, due_date, scheduled_date,
-        project_id, show_in_week_plan, sort_order, today_sort_order
+        project_id, show_in_week_plan, sort_order, today_sort_order,
+        estimated_minutes, energy_level, preferred_period, completed_at
        FROM tasks WHERE user_id = ?
        ORDER BY sort_order ASC, created_at ASC`
     )
@@ -338,6 +374,9 @@ function createTaskInTransaction(
     scheduledDate?: string | null;
     projectId?: string | null;
     showInWeekPlan?: boolean;
+    estimatedMinutes?: number | null;
+    energyLevel?: TaskItem["energyLevel"] | null;
+    preferredPeriod?: TaskItem["preferredPeriod"] | null;
   }
 ): TaskItem {
   const settings = getSettings(userId);
@@ -358,6 +397,9 @@ function createTaskInTransaction(
   }
   const id = randomUUID();
   const timestamp = now();
+  const estimatedMinutes = nullableEstimatedMinutes(input.estimatedMinutes);
+  const energyLevel = nullableEnergyLevel(input.energyLevel);
+  const preferredPeriod = nullablePreferredPeriod(input.preferredPeriod);
   const groupWhere = input.projectId
     ? "project_id = ? AND user_id = ?"
     : showInWeekPlan
@@ -384,8 +426,9 @@ function createTaskInTransaction(
     .prepare(
       `INSERT INTO tasks
        (id, user_id, title, description, priority, status, due_date, scheduled_date, project_id,
-        show_in_week_plan, sort_order, today_sort_order, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, 'todo', ?, ?, ?, ?, ?, ?, ?, ?)`
+        show_in_week_plan, sort_order, today_sort_order, estimated_minutes, energy_level,
+        preferred_period, completed_at, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, 'todo', ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)`
     )
     .run(
       id,
@@ -399,6 +442,9 @@ function createTaskInTransaction(
       showInWeekPlan ? 1 : 0,
       max.max_order + 1,
       todaySortOrder,
+      estimatedMinutes,
+      energyLevel,
+      preferredPeriod,
       timestamp,
       timestamp
     );
@@ -415,6 +461,9 @@ export function createTask(
     scheduledDate?: string | null;
     projectId?: string | null;
     showInWeekPlan?: boolean;
+    estimatedMinutes?: number | null;
+    energyLevel?: TaskItem["energyLevel"] | null;
+    preferredPeriod?: TaskItem["preferredPeriod"] | null;
   }
 ): TaskItem {
   return commitMutation(userId, () => ({ value: createTaskInTransaction(userId, input), changed: true }));
@@ -436,6 +485,9 @@ export function updateTask(
     dueDate: string | null;
     scheduledDate: string | null;
     showInWeekPlan: boolean;
+    estimatedMinutes: number | null;
+    energyLevel: TaskItem["energyLevel"] | null;
+    preferredPeriod: TaskItem["preferredPeriod"] | null;
   }>
 ): TaskItem | undefined {
   const currentRow = taskRow(userId, id);
@@ -454,6 +506,22 @@ export function updateTask(
       : current.scheduledDate ?? null;
   const priority = requiredPriority(input.priority, current.priority);
   const showInWeekPlan = input.showInWeekPlan ?? Boolean(current.showInWeekPlan);
+  const estimatedMinutes = Object.prototype.hasOwnProperty.call(input, "estimatedMinutes")
+    ? nullableEstimatedMinutes(input.estimatedMinutes)
+    : current.estimatedMinutes ?? null;
+  const energyLevel = Object.prototype.hasOwnProperty.call(input, "energyLevel")
+    ? nullableEnergyLevel(input.energyLevel)
+    : current.energyLevel ?? null;
+  const preferredPeriod = Object.prototype.hasOwnProperty.call(input, "preferredPeriod")
+    ? nullablePreferredPeriod(input.preferredPeriod)
+    : current.preferredPeriod ?? null;
+  const nextDone = input.done ?? current.done;
+  const completedAt =
+    input.done === undefined
+      ? current.completedAt ?? null
+      : input.done
+        ? current.completedAt ?? now()
+        : null;
   return commitMutation(userId, () => {
     let todaySortOrder = current.todaySortOrder ?? 0;
     if (scheduledDate && scheduledDate !== current.scheduledDate) {
@@ -477,18 +545,23 @@ export function updateTask(
       .prepare(
         `UPDATE tasks SET title = ?, description = ?, priority = ?, status = ?,
          due_date = ?, scheduled_date = ?, show_in_week_plan = ?, sort_order = ?,
-         today_sort_order = ?, updated_at = ? WHERE id = ? AND user_id = ?`
+         today_sort_order = ?, estimated_minutes = ?, energy_level = ?, preferred_period = ?,
+         completed_at = ?, updated_at = ? WHERE id = ? AND user_id = ?`
       )
       .run(
         input.title?.trim() || current.title,
         input.description ?? current.description ?? "",
         priority,
-        input.done === undefined ? (current.done ? "done" : "todo") : input.done ? "done" : "todo",
+        nextDone ? "done" : "todo",
         scheduledDate,
         scheduledDate,
         showInWeekPlan ? 1 : 0,
         sortOrder,
         todaySortOrder,
+        estimatedMinutes,
+        energyLevel,
+        preferredPeriod,
+        completedAt,
         now(),
         id,
         userId

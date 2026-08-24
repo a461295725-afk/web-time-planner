@@ -6,6 +6,7 @@ import { migrateDatabase, migrationVersion } from "./migrations";
 const DB_PATH = process.env.DB_PATH || "time-planner.db";
 mkdirSync(dirname(DB_PATH), { recursive: true });
 const sqlite = new Database(DB_PATH);
+sqlite.pragma("busy_timeout = 10000");
 sqlite.pragma("journal_mode = WAL");
 sqlite.pragma("foreign_keys = ON");
 migrateDatabase(sqlite);

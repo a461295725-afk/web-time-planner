@@ -1,0 +1,14 @@
+node_modules/
+.next/
+coverage/
+data/
+backups/
+.env
+.env.*
+*.db
+*.db-*
+*.tsbuildinfo
+npm-debug.log*
+.DS_Store
+.codex-*
+
