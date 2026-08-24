@@ -9,7 +9,7 @@
     "db:init": "npx tsx src/db/init.ts",
     "db:migrate": "npx tsx scripts/migrate.mjs",
     "db:claim-legacy": "npx tsx scripts/claim-legacy.mjs",
-    "test": "tsx tests/run.ts"
+    "test": "tsx tests/run.ts && tsx tests/v31-capture-search.ts && tsx tests/v32-smart-day.ts && tsx tests/v33-review.ts && tsx tests/integration-v3.ts"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",

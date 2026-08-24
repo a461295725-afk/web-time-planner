@@ -1,19 +1,30 @@
 "use client";
 
 import Link from "next/link";
-import { Bookmark, FolderKanban, Lightbulb, Plus } from "lucide-react";
+import {
+  Bookmark,
+  BrainCircuit,
+  ClipboardCheck,
+  FolderKanban,
+  Inbox,
+  Lightbulb,
+  Plus,
+} from "lucide-react";
 
 export default function QuickActionBar({
   onCreateTask,
   active,
 }: {
   onCreateTask?: () => void;
-  active?: "projects" | "ideas" | "reading" | "week";
+  active?: "today" | "inbox" | "review" | "search" | "projects" | "ideas" | "reading" | "week";
 }) {
   const buttons = [
+    { icon: BrainCircuit, label: "智能今天", href: "/today", key: "today", color: "text-accent-green" },
+    { icon: Inbox, label: "收件箱", href: "/inbox", key: "inbox", color: "text-sky-400" },
     { icon: FolderKanban, label: "项目", href: "/projects", key: "projects", color: "text-accent-purple" },
     { icon: Lightbulb, label: "想法", href: "/ideas", key: "ideas", color: "text-yellow-400" },
     { icon: Bookmark, label: "稍后阅读", href: "/reading", key: "reading", color: "text-accent-green" },
+    { icon: ClipboardCheck, label: "复盘", href: "/review", key: "review", color: "text-orange-300" },
   ];
 
   return (

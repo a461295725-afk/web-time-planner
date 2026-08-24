@@ -15,7 +15,7 @@ export default function WorkspaceShell({
   action,
   children,
 }: {
-  active: "projects" | "ideas" | "reading" | "week";
+  active: "today" | "inbox" | "review" | "search" | "projects" | "ideas" | "reading" | "week";
   kicker: string;
   title: string;
   description: string;

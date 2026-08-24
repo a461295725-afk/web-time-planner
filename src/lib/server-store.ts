@@ -523,6 +523,7 @@ export function updateTask(
         ? current.completedAt ?? now()
         : null;
   return commitMutation(userId, () => {
+    const timestamp = now();
     let todaySortOrder = current.todaySortOrder ?? 0;
     if (scheduledDate && scheduledDate !== current.scheduledDate) {
       const max = sqlite
@@ -562,10 +563,43 @@ export function updateTask(
         energyLevel,
         preferredPeriod,
         completedAt,
-        now(),
+        timestamp,
         id,
         userId
       );
+    if (input.done !== undefined && input.done !== current.done) {
+      sqlite
+        .prepare(
+          `INSERT INTO planning_feedback_events
+           (id, user_id, plan_id, task_id, date, event_type, payload_json, created_at)
+           VALUES (?, ?, NULL, ?, ?, ?, ?, ?)`
+        )
+        .run(
+          randomUUID(),
+          userId,
+          id,
+          todayKey(),
+          input.done ? "completed" : "reopened",
+          JSON.stringify({ scheduledDate }),
+          timestamp
+        );
+    }
+    if (scheduledDate !== current.scheduledDate) {
+      sqlite
+        .prepare(
+          `INSERT INTO planning_feedback_events
+           (id, user_id, plan_id, task_id, date, event_type, payload_json, created_at)
+           VALUES (?, ?, NULL, ?, ?, 'rescheduled', ?, ?)`
+        )
+        .run(
+          randomUUID(),
+          userId,
+          id,
+          todayKey(),
+          JSON.stringify({ from: current.scheduledDate ?? null, to: scheduledDate }),
+          timestamp
+        );
+    }
     return { value: getTask(userId, id), changed: true };
   });
 }

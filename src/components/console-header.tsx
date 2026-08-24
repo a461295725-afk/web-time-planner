@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { ChevronDown, LogOut, Radio, User } from "lucide-react";
+import { ChevronDown, LogOut, Search, User } from "lucide-react";
 import { displayDate, todayKey } from "@/lib/date";
 import SettingsPanel from "@/components/settings-panel";
 import { useAuth } from "@/lib/auth-context";
@@ -30,6 +30,14 @@ export default function ConsoleHeader() {
           <User className="h-3 w-3 text-accent-green" />
           {username}
         </div>
+        <button
+          onClick={() => window.dispatchEvent(new Event("time-planner:open-command"))}
+          aria-label="打开全局搜索和快速收集"
+          title="搜索和快速收集（Ctrl/Cmd+K）"
+          className="rounded-full border border-card-border bg-card/70 p-2 text-text-secondary transition-colors hover:border-accent-green/35 hover:text-accent-green"
+        >
+          <Search className="h-4 w-4" />
+        </button>
         <SettingsPanel />
         <button
           onClick={() => void logout()}
