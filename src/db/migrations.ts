@@ -525,15 +525,19 @@ function applyMigration(sqlite: SqliteDatabase, version: number): void {
 }
 
 export function migrateDatabase(sqlite: SqliteDatabase): void {
-  sqlite.exec("CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, applied_at INTEGER NOT NULL)");
-  const applied = new Set((sqlite.prepare("SELECT version FROM schema_migrations ORDER BY version").all() as { version: number }[]).map((row) => row.version));
-  for (let version = 1; version <= CURRENT_VERSION; version += 1) {
-    if (applied.has(version)) continue;
-    sqlite.transaction(() => {
+  const migrate = sqlite.transaction(() => {
+    sqlite.exec("CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, applied_at INTEGER NOT NULL)");
+    const applied = new Set((sqlite.prepare("SELECT version FROM schema_migrations ORDER BY version").all() as { version: number }[]).map((row) => row.version));
+    for (let version = 1; version <= CURRENT_VERSION; version += 1) {
+      if (applied.has(version)) continue;
       applyMigration(sqlite, version);
       sqlite.prepare("INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)").run(version, Date.now());
-    })();
-  }
+    }
+  });
+  // A single immediate transaction serialises migrations across Next.js build
+  // workers and multiple app processes. Each waiter re-reads the applied set
+  // only after it owns the write lock, so stale migration plans cannot race.
+  migrate.immediate();
 }
 
 export function migrationVersion(): number {
