@@ -12,4 +12,3 @@
 - You are not alone in the codebase. Do not revert other agents' edits; adapt to concurrent changes.
 - Shared files are owned by the root agent unless explicitly reassigned: database schema/migrations, package files, global layout/navigation, shared task types/store integration.
 - Verification order: tests, `npx tsc --noEmit --incremental false`, then `npx next build --webpack`.
-
