@@ -32,6 +32,7 @@ try {
 
   const source = "2026-08-23";
   const target = "2026-08-24";
+  const old = new Date("2026-08-12T00:00:00+08:00").getTime();
   const projectId = randomUUID();
   sqlite
     .prepare(
@@ -39,13 +40,12 @@ try {
         project_order, created_at, updated_at)
        VALUES (?, ?, ?, '', NULL, 1, 0, NULL, 0, ?, ?)`
     )
-    .run(projectId, userA, "停滞测试项目", Date.now() - 12 * 86400000, Date.now() - 12 * 86400000);
+    .run(projectId, userA, "停滞测试项目", old, old);
   const p1Id = randomUUID();
   const p1WithoutDueDateId = randomUUID();
   const p2Id = randomUUID();
   const doneId = randomUUID();
   const estimateId = randomUUID();
-  const old = Date.now() - 12 * 86400000;
   const insertTask = sqlite.prepare(
     `INSERT INTO tasks
       (id, user_id, title, description, priority, status, due_date, scheduled_date, project_id,
