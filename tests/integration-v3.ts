@@ -19,6 +19,12 @@ function request(
   });
 }
 
+function hermesRequest(url: string, token?: string): Request {
+  const headers = new Headers();
+  if (token) headers.set("X-API-Token", token);
+  return new Request(url, { headers });
+}
+
 async function json<T>(response: Response): Promise<T> {
   const value = (await response.json()) as T;
   assert(response.ok, JSON.stringify(value));
@@ -48,6 +54,8 @@ async function main(): Promise<void> {
   const carryoverRoute = await import("../src/app/api/reviews/carryover/route");
   const memoryRoute = await import("../src/app/api/agent/memory/route");
   const exportRoute = await import("../src/app/api/export/route");
+  const hermesSmartDayRoute = await import("../src/app/api/v1/smart-day/route");
+  const freebusyRoute = await import("../src/app/api/v1/freebusy/route");
 
   try {
     const createdAt = Date.now();
@@ -63,6 +71,27 @@ async function main(): Promise<void> {
       .run("user-b", "integration-b", "test-only-hash-b", createdAt);
     const cookieA = `wtp_session=${createSession("user-a").token}`;
     const cookieB = `wtp_session=${createSession("user-b").token}`;
+    const hermesTokenA = "integration-hermes-token-user-a";
+    const hermesTokenB = "integration-hermes-token-user-b";
+    const insertHermesToken = sqlite.prepare(
+      `INSERT INTO hermes_api_tokens
+       (id, user_id, token_hash, token_last4, created_at, rotated_at, revoked_at)
+       VALUES (?, ?, ?, ?, ?, NULL, NULL)`
+    );
+    insertHermesToken.run(
+      randomUUID(),
+      "user-a",
+      createHash("sha256").update(hermesTokenA).digest("hex"),
+      hermesTokenA.slice(-4),
+      createdAt
+    );
+    insertHermesToken.run(
+      randomUUID(),
+      "user-b",
+      createHash("sha256").update(hermesTokenB).digest("hex"),
+      hermesTokenB.slice(-4),
+      createdAt
+    );
 
     const unauthorized = await searchRoute.GET(request("http://local/api/search?q=秘密"));
     assert.equal(unauthorized.status, 401);
@@ -102,25 +131,45 @@ async function main(): Promise<void> {
         })
       )
     );
+    const rejectedPlanTask = await json<{ id: string }>(
+      await taskRoute.POST(
+        request("http://local/api/tasks", cookieA, "POST", {
+          title: "不会占用忙闲的已拒绝任务",
+          priority: "P2",
+          showInWeekPlan: true,
+          estimatedMinutes: 30,
+          preferredPeriod: "morning",
+        })
+      )
+    );
     const draft = await json<{
       plan: { id: string; items: { id: string; taskId: string }[] };
     }>(
       await draftRoute.POST(
         request("http://local/api/smart-day/drafts", cookieA, "POST", {
           date: "2026-08-24",
-          taskIds: [planTask.id],
+          taskIds: [planTask.id, rejectedPlanTask.id],
           useAi: false,
         })
       )
     );
-    assert.equal(draft.plan.items.length, 1);
-    const planItem = draft.plan.items[0];
+    assert.equal(draft.plan.items.length, 2);
+    const planItem = draft.plan.items.find((item) => item.taskId === planTask.id)!;
+    const rejectedPlanItem = draft.plan.items.find((item) => item.taskId === rejectedPlanTask.id)!;
     await json(
       await itemRoute.PATCH(
         request("http://local/api/smart-day/items/x", cookieA, "PATCH", {
           action: "accept",
         }),
         { params: Promise.resolve({ id: planItem.id }) }
+      )
+    );
+    await json(
+      await itemRoute.PATCH(
+        request("http://local/api/smart-day/items/x", cookieA, "PATCH", {
+          action: "reject",
+        }),
+        { params: Promise.resolve({ id: rejectedPlanItem.id }) }
       )
     );
     await json(
@@ -132,6 +181,58 @@ async function main(): Promise<void> {
       await smartDayRoute.GET(request("http://local/api/smart-day?date=2026-08-24", cookieB))
     );
     assert.equal(otherPlan.plan, null);
+
+    assert.equal(
+      (await freebusyRoute.GET(hermesRequest("http://local/api/v1/freebusy?from=2026-08-24&to=2026-08-30"))).status,
+      401
+    );
+    assert.equal(
+      (await freebusyRoute.GET(hermesRequest("http://local/api/v1/freebusy?from=2026-08-24&to=2026-08-30", "wrong-hermes-token-for-test"))).status,
+      401
+    );
+    assert.equal(
+      (await freebusyRoute.GET(hermesRequest("http://local/api/v1/freebusy", hermesTokenA))).status,
+      400
+    );
+    const smartDayForHermes = await json<{ date: string }>(
+      await hermesSmartDayRoute.GET(
+        hermesRequest("http://local/api/v1/smart-day?date=2026-08-24&kind=morning", hermesTokenA)
+      )
+    );
+    assert.equal(smartDayForHermes.date, "2026-08-24");
+    const freebusyA = await json<{
+      timezone: string;
+      days: { busy: { taskId: string }[]; free: { start: string }[] }[];
+    }>(
+      await freebusyRoute.GET(
+        hermesRequest("http://local/api/v1/freebusy?from=2026-08-24&to=2026-08-30", hermesTokenA)
+      )
+    );
+    assert.equal(freebusyA.timezone, "Asia/Shanghai");
+    assert.equal(freebusyA.days.length, 7);
+    assert.deepEqual(freebusyA.days[0].busy.map((item) => item.taskId), [planTask.id]);
+    assert.equal(freebusyA.days[0].free[0].start, "09:30");
+    const freebusyB = await json<{ days: { busy: unknown[] }[] }>(
+      await freebusyRoute.GET(
+        hermesRequest("http://local/api/v1/freebusy?from=2026-08-24&to=2026-08-30", hermesTokenB)
+      )
+    );
+    assert.equal(freebusyB.days.length, 7);
+    assert.equal(freebusyB.days[0].busy.length, 0);
+    const month = await json<{ days: unknown[] }>(
+      await freebusyRoute.GET(
+        hermesRequest("http://local/api/v1/freebusy?from=2026-08-01&to=2026-08-31", hermesTokenA)
+      )
+    );
+    assert.equal(month.days.length, 31);
+    assert.equal(
+      (
+        await freebusyRoute.GET(
+          hermesRequest("http://local/api/v1/freebusy?from=2026-08-01&to=2026-09-01", hermesTokenA)
+        )
+      ).status,
+      400
+    );
 
     const focus = await json<{ id: string; status: string }>(
       await focusRoute.POST(
