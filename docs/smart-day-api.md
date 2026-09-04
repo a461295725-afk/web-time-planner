@@ -121,3 +121,41 @@ GET /api/v1/smart-day?date=2026-08-24&kind=evening
 - `evening`：完成数、完成任务、未完成任务、计划分钟和实际专注分钟。
 
 这些 GET 请求不会确认计划、改变任务日期、完成任务或写入结转。Hermes 负责定时轮询和发送消息，Time Planner 本身不运行后台定时器。
+
+## Hermes 范围忙闲
+
+```text
+GET /api/v1/freebusy?from=2026-09-01&to=2026-09-07
+X-API-Token: <用户的 Hermes Token>
+```
+
+`from` 和 `to` 都是必填的闭区间日期，单次最多查询 31 天，因此可覆盖一周或一个月。时区固定为 `Asia/Shanghai`，接口不会接受或伪装其他时区。
+
+返回每天的工作窗口、占用和空闲片段；时间同时提供 `HH:mm` 和从当天零点开始的分钟数：
+
+```json
+{
+  "from": "2026-09-01",
+  "to": "2026-09-01",
+  "timezone": "Asia/Shanghai",
+  "days": [
+    {
+      "date": "2026-09-01",
+      "workWindows": [
+        {"block":"morning","startMinute":540,"endMinute":720,"start":"09:00","end":"12:00"}
+      ],
+      "busy": [
+        {"block":"morning","startMinute":540,"endMinute":585,"start":"09:00","end":"09:45","planItemId":"...","taskId":"...","title":"整理周报","status":"accepted"}
+      ],
+      "free": [
+        {"block":"morning","startMinute":585,"endMinute":720,"start":"09:45","end":"12:00"}
+      ],
+      "freeMinutes": 135
+    }
+  ]
+}
+```
+
+占用只来自当前用户非 `rejected` 的 `day_plan_items`，空闲由当前用户在 `app_settings` 中的智能安排工作窗口减去这些占用得到。仅设置 `scheduled_date`、但尚未形成计划时间段的任务不会占满全天。
+
+聊天助手可以先读取范围忙闲，再使用现有 `/api/v1/tasks` 创建任务或更新 `scheduledDate`；精确时间段仍由智能今天草案管理。本接口只读，不创建日历、后台任务或外部订阅。
