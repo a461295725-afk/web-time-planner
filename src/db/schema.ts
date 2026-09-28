@@ -75,6 +75,28 @@ export const tasks = sqliteTable("tasks", {
     enum: ["morning", "afternoon", "evening", "anytime"],
   }),
   completedAt: integer("completed_at"),
+  executionState: text("execution_state", {
+    enum: ["active", "waiting", "blocked"],
+  })
+    .notNull()
+    .default("active"),
+  nextAction: text("next_action"),
+  doneDefinition: text("done_definition"),
+  waitingOn: text("waiting_on"),
+  followUpDate: text("follow_up_date"),
+  blocker: text("blocker"),
+  taskLevel: text("task_level", {
+    enum: ["milestone", "task", "action"],
+  })
+    .notNull()
+    .default("action"),
+  parentTaskId: text("parent_task_id").references((): any => tasks.id, {
+    onDelete: "set null",
+  }),
+  originSource: text("origin_source").notNull().default("manual"),
+  originRef: text("origin_ref"),
+  completionOutcome: text("completion_outcome", { enum: ["done", "dropped"] }),
+  lastOutcomeAt: integer("last_outcome_at"),
   createdAt: integer("created_at").notNull(),
   updatedAt: integer("updated_at").notNull(),
 });
@@ -332,5 +354,113 @@ export const agentMemories = sqliteTable(
       table.category,
       table.key
     ),
+  })
+);
+
+export const assistantApiTokens = sqliteTable(
+  "assistant_api_tokens",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id").notNull().references(() => users.id),
+    name: text("name").notNull(),
+    tokenHash: text("token_hash").notNull().unique(),
+    tokenLast4: text("token_last4").notNull(),
+    scopesJson: text("scopes_json").notNull().default("[]"),
+    createdAt: integer("created_at").notNull(),
+    lastUsedAt: integer("last_used_at"),
+    revokedAt: integer("revoked_at"),
+  },
+  (table) => ({
+    userName: uniqueIndex("idx_assistant_tokens_user_name").on(table.userId, table.name),
+    userActive: index("idx_assistant_tokens_user_active").on(table.userId, table.revokedAt),
+  })
+);
+
+export const assistantIdempotency = sqliteTable(
+  "assistant_idempotency",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id").notNull().references(() => users.id),
+    tokenId: text("token_id").notNull(),
+    idempotencyKey: text("idempotency_key").notNull(),
+    requestFingerprint: text("request_fingerprint").notNull(),
+    responseStatus: integer("response_status").notNull(),
+    responseJson: text("response_json").notNull(),
+    createdAt: integer("created_at").notNull(),
+  },
+  (table) => ({
+    tokenKey: uniqueIndex("idx_assistant_idempotency_token_key").on(
+      table.tokenId,
+      table.idempotencyKey
+    ),
+    userCreated: index("idx_assistant_idempotency_user_created").on(
+      table.userId,
+      table.createdAt
+    ),
+  })
+);
+
+export const assistantAuditEvents = sqliteTable(
+  "assistant_audit_events",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id").notNull().references(() => users.id),
+    tokenId: text("token_id").notNull(),
+    assistantName: text("assistant_name").notNull(),
+    method: text("method").notNull(),
+    path: text("path").notNull(),
+    idempotencyKey: text("idempotency_key").notNull(),
+    requestFingerprint: text("request_fingerprint").notNull(),
+    responseStatus: integer("response_status").notNull(),
+    createdAt: integer("created_at").notNull(),
+  },
+  (table) => ({
+    userCreated: index("idx_assistant_audit_user_created").on(
+      table.userId,
+      table.createdAt
+    ),
+    tokenCreated: index("idx_assistant_audit_token_created").on(
+      table.tokenId,
+      table.createdAt
+    ),
+  })
+);
+
+export const taskOutcomes = sqliteTable(
+  "task_outcomes",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id").notNull().references(() => users.id),
+    taskId: text("task_id").notNull().references(() => tasks.id, { onDelete: "cascade" }),
+    date: text("date").notNull(),
+    outcome: text("outcome", {
+      enum: ["done", "partial", "postponed", "dropped"],
+    }).notNull(),
+    note: text("note").notNull().default(""),
+    nextAction: text("next_action"),
+    actualMinutes: integer("actual_minutes"),
+    source: text("source").notNull().default("manual"),
+    createdAt: integer("created_at").notNull(),
+  },
+  (table) => ({
+    userDate: index("idx_task_outcomes_user_date").on(table.userId, table.date),
+    taskCreated: index("idx_task_outcomes_task_created").on(table.taskId, table.createdAt),
+  })
+);
+
+export const workflowTemplates = sqliteTable(
+  "workflow_templates",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id").notNull().references(() => users.id),
+    name: text("name").notNull(),
+    description: text("description").notNull().default(""),
+    stepsJson: text("steps_json").notNull().default("[]"),
+    source: text("source").notNull().default("manual"),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (table) => ({
+    userName: uniqueIndex("idx_workflow_templates_user_name").on(table.userId, table.name),
   })
 );

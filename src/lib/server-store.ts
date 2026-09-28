@@ -44,7 +44,45 @@ type TaskRow = {
   energy_level: TaskItem["energyLevel"] | null;
   preferred_period: TaskItem["preferredPeriod"] | null;
   completed_at: number | null;
+  execution_state: NonNullable<TaskItem["executionState"]>;
+  next_action: string | null;
+  done_definition: string | null;
+  waiting_on: string | null;
+  follow_up_date: string | null;
+  blocker: string | null;
+  task_level: NonNullable<TaskItem["taskLevel"]>;
+  parent_task_id: string | null;
+  origin_source: string;
+  origin_ref: string | null;
+  completion_outcome: TaskItem["completionOutcome"] | null;
+  last_outcome_at: number | null;
 };
+
+type TaskMutationInput = {
+  title?: string;
+  description?: string;
+  priority?: TaskItem["priority"];
+  done?: boolean;
+  dueDate?: string | null;
+  scheduledDate?: string | null;
+  projectId?: string | null;
+  showInWeekPlan?: boolean;
+  estimatedMinutes?: number | null;
+  energyLevel?: TaskItem["energyLevel"] | null;
+  preferredPeriod?: TaskItem["preferredPeriod"] | null;
+  executionState?: TaskItem["executionState"];
+  nextAction?: string | null;
+  doneDefinition?: string | null;
+  waitingOn?: string | null;
+  followUpDate?: string | null;
+  blocker?: string | null;
+  taskLevel?: TaskItem["taskLevel"];
+  parentTaskId?: string | null;
+  originSource?: string;
+  originRef?: string | null;
+};
+
+type TaskCreateInput = TaskMutationInput & { title: string };
 
 type ProjectRow = {
   id: string;
@@ -120,6 +158,34 @@ function nullablePreferredPeriod(
     invalid("偏好时段无效");
   }
   return value;
+}
+
+function nullableText(value: string | null | undefined): string | null {
+  if (value === undefined || value === null) return null;
+  const cleaned = value.trim();
+  return cleaned || null;
+}
+
+function requiredExecutionState(
+  value: TaskItem["executionState"] | undefined,
+  fallback: NonNullable<TaskItem["executionState"]>
+): NonNullable<TaskItem["executionState"]> {
+  const next = value ?? fallback;
+  if (!next || !["active", "waiting", "blocked"].includes(next)) {
+    invalid("任务执行状态无效");
+  }
+  return next;
+}
+
+function requiredTaskLevel(
+  value: TaskItem["taskLevel"] | undefined,
+  fallback: NonNullable<TaskItem["taskLevel"]>
+): NonNullable<TaskItem["taskLevel"]> {
+  const next = value ?? fallback;
+  if (!next || !["milestone", "task", "action"].includes(next)) {
+    invalid("任务层级无效");
+  }
+  return next;
 }
 
 function settingsMap(userId: string): Map<string, string> {
@@ -324,6 +390,18 @@ function mapTask(row: TaskRow): TaskItem {
     energyLevel: row.energy_level ?? undefined,
     preferredPeriod: row.preferred_period ?? undefined,
     completedAt: row.completed_at ?? undefined,
+    executionState: row.execution_state,
+    nextAction: row.next_action ?? undefined,
+    doneDefinition: row.done_definition ?? undefined,
+    waitingOn: row.waiting_on ?? undefined,
+    followUpDate: row.follow_up_date ?? undefined,
+    blocker: row.blocker ?? undefined,
+    taskLevel: row.task_level,
+    parentTaskId: row.parent_task_id ?? undefined,
+    originSource: row.origin_source,
+    originRef: row.origin_ref ?? undefined,
+    completionOutcome: row.completion_outcome ?? undefined,
+    lastOutcomeAt: row.last_outcome_at ?? undefined,
   };
 }
 
@@ -345,7 +423,10 @@ function taskRow(userId: string, id: string): TaskRow | undefined {
     .prepare(
       `SELECT id, title, description, priority, status, due_date, scheduled_date,
         project_id, show_in_week_plan, sort_order, today_sort_order,
-        estimated_minutes, energy_level, preferred_period, completed_at
+        estimated_minutes, energy_level, preferred_period, completed_at,
+        execution_state, next_action, done_definition, waiting_on, follow_up_date,
+        blocker, task_level, parent_task_id, origin_source, origin_ref,
+        completion_outcome, last_outcome_at
        FROM tasks WHERE id = ? AND user_id = ?`
     )
     .get(id, userId) as TaskRow | undefined;
@@ -356,7 +437,10 @@ export function getTasks(userId: string): TaskItem[] {
     .prepare(
       `SELECT id, title, description, priority, status, due_date, scheduled_date,
         project_id, show_in_week_plan, sort_order, today_sort_order,
-        estimated_minutes, energy_level, preferred_period, completed_at
+        estimated_minutes, energy_level, preferred_period, completed_at,
+        execution_state, next_action, done_definition, waiting_on, follow_up_date,
+        blocker, task_level, parent_task_id, origin_source, origin_ref,
+        completion_outcome, last_outcome_at
        FROM tasks WHERE user_id = ?
        ORDER BY sort_order ASC, created_at ASC`
     )
@@ -366,18 +450,7 @@ export function getTasks(userId: string): TaskItem[] {
 
 function createTaskInTransaction(
   userId: string,
-  input: {
-    title: string;
-    description?: string;
-    priority?: TaskItem["priority"];
-    dueDate?: string | null;
-    scheduledDate?: string | null;
-    projectId?: string | null;
-    showInWeekPlan?: boolean;
-    estimatedMinutes?: number | null;
-    energyLevel?: TaskItem["energyLevel"] | null;
-    preferredPeriod?: TaskItem["preferredPeriod"] | null;
-  }
+  input: TaskCreateInput
 ): TaskItem {
   const settings = getSettings(userId);
   const title = input.title.trim();
@@ -400,6 +473,16 @@ function createTaskInTransaction(
   const estimatedMinutes = nullableEstimatedMinutes(input.estimatedMinutes);
   const energyLevel = nullableEnergyLevel(input.energyLevel);
   const preferredPeriod = nullablePreferredPeriod(input.preferredPeriod);
+  const executionState = requiredExecutionState(input.executionState, "active");
+  const taskLevel = requiredTaskLevel(input.taskLevel, "action");
+  const followUpDate = nullableDate(input.followUpDate, "followUpDate");
+  if (input.parentTaskId) {
+    const parent = sqlite
+      .prepare("SELECT id, project_id FROM tasks WHERE id = ? AND user_id = ?")
+      .get(input.parentTaskId, userId) as { id: string; project_id: string | null } | undefined;
+    if (!parent) invalid("上级任务不属于当前用户");
+    if (input.projectId && parent.project_id !== input.projectId) invalid("上级任务不属于同一项目");
+  }
   const groupWhere = input.projectId
     ? "project_id = ? AND user_id = ?"
     : showInWeekPlan
@@ -427,8 +510,10 @@ function createTaskInTransaction(
       `INSERT INTO tasks
        (id, user_id, title, description, priority, status, due_date, scheduled_date, project_id,
         show_in_week_plan, sort_order, today_sort_order, estimated_minutes, energy_level,
-        preferred_period, completed_at, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, 'todo', ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)`
+        preferred_period, completed_at, execution_state, next_action, done_definition, waiting_on,
+        follow_up_date, blocker, task_level, parent_task_id, origin_source, origin_ref,
+        completion_outcome, last_outcome_at, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, 'todo', ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?)`
     )
     .run(
       id,
@@ -445,6 +530,16 @@ function createTaskInTransaction(
       estimatedMinutes,
       energyLevel,
       preferredPeriod,
+      executionState,
+      nullableText(input.nextAction),
+      nullableText(input.doneDefinition),
+      nullableText(input.waitingOn),
+      followUpDate,
+      nullableText(input.blocker),
+      taskLevel,
+      input.parentTaskId ?? null,
+      nullableText(input.originSource) ?? "manual",
+      nullableText(input.originRef),
       timestamp,
       timestamp
     );
@@ -453,18 +548,7 @@ function createTaskInTransaction(
 
 export function createTask(
   userId: string,
-  input: {
-    title: string;
-    description?: string;
-    priority?: TaskItem["priority"];
-    dueDate?: string | null;
-    scheduledDate?: string | null;
-    projectId?: string | null;
-    showInWeekPlan?: boolean;
-    estimatedMinutes?: number | null;
-    energyLevel?: TaskItem["energyLevel"] | null;
-    preferredPeriod?: TaskItem["preferredPeriod"] | null;
-  }
+  input: TaskCreateInput
 ): TaskItem {
   return commitMutation(userId, () => ({ value: createTaskInTransaction(userId, input), changed: true }));
 }
@@ -477,18 +561,7 @@ export function getTask(userId: string, id: string): TaskItem | undefined {
 export function updateTask(
   userId: string,
   id: string,
-  input: Partial<{
-    title: string;
-    description: string;
-    priority: TaskItem["priority"];
-    done: boolean;
-    dueDate: string | null;
-    scheduledDate: string | null;
-    showInWeekPlan: boolean;
-    estimatedMinutes: number | null;
-    energyLevel: TaskItem["energyLevel"] | null;
-    preferredPeriod: TaskItem["preferredPeriod"] | null;
-  }>
+  input: TaskMutationInput
 ): TaskItem | undefined {
   const currentRow = taskRow(userId, id);
   if (!currentRow) return undefined;
@@ -515,6 +588,56 @@ export function updateTask(
   const preferredPeriod = Object.prototype.hasOwnProperty.call(input, "preferredPeriod")
     ? nullablePreferredPeriod(input.preferredPeriod)
     : current.preferredPeriod ?? null;
+  const executionState = requiredExecutionState(
+    input.executionState,
+    current.executionState ?? "active"
+  );
+  const taskLevel = requiredTaskLevel(input.taskLevel, current.taskLevel ?? "action");
+  const nextAction = Object.prototype.hasOwnProperty.call(input, "nextAction")
+    ? nullableText(input.nextAction)
+    : current.nextAction ?? null;
+  const doneDefinition = Object.prototype.hasOwnProperty.call(input, "doneDefinition")
+    ? nullableText(input.doneDefinition)
+    : current.doneDefinition ?? null;
+  const waitingOn = Object.prototype.hasOwnProperty.call(input, "waitingOn")
+    ? nullableText(input.waitingOn)
+    : current.waitingOn ?? null;
+  const followUpDate = Object.prototype.hasOwnProperty.call(input, "followUpDate")
+    ? nullableDate(input.followUpDate, "followUpDate")
+    : current.followUpDate ?? null;
+  const blocker = Object.prototype.hasOwnProperty.call(input, "blocker")
+    ? nullableText(input.blocker)
+    : current.blocker ?? null;
+  const parentTaskId = Object.prototype.hasOwnProperty.call(input, "parentTaskId")
+    ? input.parentTaskId ?? null
+    : current.parentTaskId ?? null;
+  if (parentTaskId) {
+    const parent = sqlite
+      .prepare("SELECT id, project_id, parent_task_id FROM tasks WHERE id = ? AND user_id = ?")
+      .get(parentTaskId, userId) as
+      | { id: string; project_id: string | null; parent_task_id: string | null }
+      | undefined;
+    if (!parent) invalid("上级任务不属于当前用户");
+    if (current.projectId && parent.project_id !== current.projectId) {
+      invalid("上级任务不属于同一项目");
+    }
+    let ancestor: typeof parent | undefined = parent;
+    const seen = new Set<string>();
+    while (ancestor) {
+      if (ancestor.id === id) invalid("任务层级不能形成循环");
+      if (!ancestor.parent_task_id || seen.has(ancestor.parent_task_id)) break;
+      seen.add(ancestor.id);
+      ancestor = sqlite
+        .prepare("SELECT id, project_id, parent_task_id FROM tasks WHERE id = ? AND user_id = ?")
+        .get(ancestor.parent_task_id, userId) as typeof parent | undefined;
+    }
+  }
+  const originSource = Object.prototype.hasOwnProperty.call(input, "originSource")
+    ? nullableText(input.originSource) ?? "manual"
+    : current.originSource ?? "manual";
+  const originRef = Object.prototype.hasOwnProperty.call(input, "originRef")
+    ? nullableText(input.originRef)
+    : current.originRef ?? null;
   const nextDone = input.done ?? current.done;
   const completedAt =
     input.done === undefined
@@ -547,7 +670,10 @@ export function updateTask(
         `UPDATE tasks SET title = ?, description = ?, priority = ?, status = ?,
          due_date = ?, scheduled_date = ?, show_in_week_plan = ?, sort_order = ?,
          today_sort_order = ?, estimated_minutes = ?, energy_level = ?, preferred_period = ?,
-         completed_at = ?, updated_at = ? WHERE id = ? AND user_id = ?`
+         completed_at = ?, execution_state = ?, next_action = ?, done_definition = ?,
+         waiting_on = ?, follow_up_date = ?, blocker = ?, task_level = ?, parent_task_id = ?,
+         origin_source = ?, origin_ref = ?, completion_outcome = ?, last_outcome_at = ?,
+         updated_at = ? WHERE id = ? AND user_id = ?`
       )
       .run(
         input.title?.trim() || current.title,
@@ -563,6 +689,18 @@ export function updateTask(
         energyLevel,
         preferredPeriod,
         completedAt,
+        executionState,
+        nextAction,
+        doneDefinition,
+        waitingOn,
+        followUpDate,
+        blocker,
+        taskLevel,
+        parentTaskId,
+        originSource,
+        originRef,
+        input.done === false ? null : current.completionOutcome ?? null,
+        input.done === false ? null : current.lastOutcomeAt ?? null,
         timestamp,
         id,
         userId

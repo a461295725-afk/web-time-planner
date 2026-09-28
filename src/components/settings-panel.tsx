@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import {
+  Bot,
   Check,
   KeyRound,
   LoaderCircle,
@@ -18,6 +19,40 @@ import {
   themeOptions,
 } from "@/lib/settings";
 import { useAuth } from "@/lib/auth-context";
+
+type AssistantScope =
+  | "context:read"
+  | "tasks:write"
+  | "plans:write"
+  | "reviews:write"
+  | "templates:write";
+
+type AssistantToken = {
+  id: string;
+  name: string;
+  last4: string;
+  scopes: AssistantScope[];
+  createdAt: number;
+  lastUsedAt: number | null;
+  revokedAt: number | null;
+};
+
+type AssistantAuditEvent = {
+  id: string;
+  assistantName: string;
+  method: string;
+  path: string;
+  responseStatus: number;
+  createdAt: number;
+};
+
+const assistantScopeLabels: Record<AssistantScope, string> = {
+  "context:read": "读取任务、忙闲与复盘",
+  "tasks:write": "新增、调整任务和记录结果",
+  "plans:write": "生成与确认今日计划",
+  "reviews:write": "保存日复盘与周复盘",
+  "templates:write": "保存并应用流程模板",
+};
 
 const defaultsByProvider: Record<AiProvider, { model: string; url: string }> = {
   openai: {
@@ -52,6 +87,13 @@ export default function SettingsPanel() {
   const [testing, setTesting] = useState(false);
   const [notice, setNotice] = useState("");
   const [oneTimeHermesToken, setOneTimeHermesToken] = useState<string | null>(null);
+  const [assistantTokens, setAssistantTokens] = useState<AssistantToken[]>([]);
+  const [assistantAudit, setAssistantAudit] = useState<AssistantAuditEvent[]>([]);
+  const [assistantName, setAssistantName] = useState("Grok");
+  const [assistantScopes, setAssistantScopes] = useState<AssistantScope[]>(
+    Object.keys(assistantScopeLabels) as AssistantScope[]
+  );
+  const [oneTimeAssistantToken, setOneTimeAssistantToken] = useState<string | null>(null);
 
   // Create user state
   const [newUsername, setNewUsername] = useState("");
@@ -60,11 +102,23 @@ export default function SettingsPanel() {
   const [createNotice, setCreateNotice] = useState("");
 
   const load = async () => {
-    const response = await fetch("/api/settings", { cache: "no-store" });
-    if (!response.ok) return;
-    const data = (await response.json()) as PublicSettings;
-    setSettings(data);
-    document.documentElement.dataset.theme = data.theme;
+    const [settingsResponse, tokensResponse] = await Promise.all([
+      fetch("/api/settings", { cache: "no-store" }),
+      fetch("/api/assistant-tokens", { cache: "no-store" }),
+    ]);
+    if (settingsResponse.ok) {
+      const data = (await settingsResponse.json()) as PublicSettings;
+      setSettings(data);
+      document.documentElement.dataset.theme = data.theme;
+    }
+    if (tokensResponse.ok) {
+      const data = (await tokensResponse.json()) as {
+        tokens: AssistantToken[];
+        audit: AssistantAuditEvent[];
+      };
+      setAssistantTokens(data.tokens);
+      setAssistantAudit(data.audit);
+    }
   };
 
   useEffect(() => {
@@ -154,6 +208,58 @@ export default function SettingsPanel() {
     } finally {
       setSaving(false);
     }
+  };
+
+  const issueExternalAssistantToken = async () => {
+    setSaving(true);
+    setNotice("");
+    try {
+      const response = await fetch("/api/assistant-tokens", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: assistantName, scopes: assistantScopes }),
+      });
+      const result = (await response.json()) as AssistantToken & { token?: string; error?: string };
+      if (!response.ok || !result.token) {
+        setNotice(result.error ?? "外部助手 Token 创建失败");
+        return;
+      }
+      setOneTimeAssistantToken(result.token);
+      setNotice("外部助手 Token 只显示这一次，请立即复制给受信任的助手");
+      await load();
+    } catch {
+      setNotice("外部助手 Token 创建失败，请检查服务器连接");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const revokeExternalAssistantToken = async (id: string) => {
+    setSaving(true);
+    try {
+      const response = await fetch("/api/assistant-tokens", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id }),
+      });
+      if (!response.ok) {
+        setNotice("外部助手 Token 撤销失败");
+        return;
+      }
+      setOneTimeAssistantToken(null);
+      setNotice("外部助手 Token 已撤销");
+      await load();
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const toggleAssistantScope = (scope: AssistantScope) => {
+    setAssistantScopes((current) =>
+      current.includes(scope)
+        ? current.filter((item) => item !== scope)
+        : [...current, scope]
+    );
   };
 
   const handleCreateUser = async () => {
@@ -412,6 +518,84 @@ export default function SettingsPanel() {
                   </button>
                 )}
               </div>
+            </section>
+
+            <section className="mb-6 rounded-2xl border border-accent-purple/20 bg-accent-purple/[0.03] p-4">
+              <h3 className="mb-2 flex items-center gap-2 text-sm font-medium">
+                <Bot className="h-4 w-4 text-accent-purple" />
+                外部 AI 助手
+              </h3>
+              <p className="mb-3 text-[11px] leading-5 text-text-muted">
+                给 Grok 等外部助手单独发一个可撤销 Token。它只能使用你勾选的能力，不会获得登录密码；写入请求还必须带防重复键。
+              </p>
+              <input
+                value={assistantName}
+                onChange={(event) => setAssistantName(event.target.value)}
+                placeholder="助手名称，例如 Grok"
+                className="mb-3 w-full rounded-xl border border-white/[0.08] bg-black/20 px-3 py-2.5 text-sm text-text-primary outline-none"
+              />
+              <div className="mb-3 space-y-2">
+                {(Object.entries(assistantScopeLabels) as [AssistantScope, string][]).map(([scope, label]) => (
+                  <label key={scope} className="flex cursor-pointer items-center gap-2 text-xs text-text-secondary">
+                    <input
+                      type="checkbox"
+                      checked={assistantScopes.includes(scope)}
+                      onChange={() => toggleAssistantScope(scope)}
+                      className="accent-[var(--accent-green)]"
+                    />
+                    {label}
+                  </label>
+                ))}
+              </div>
+              {oneTimeAssistantToken && (
+                <div className="mb-3 rounded-xl border border-accent-green/30 bg-accent-green/[0.06] p-3">
+                  <p className="mb-2 text-[10px] text-accent-green">仅显示一次的外部助手 Token</p>
+                  <code className="block break-all font-mono text-xs text-text-primary">{oneTimeAssistantToken}</code>
+                  <button
+                    onClick={() => void navigator.clipboard?.writeText(oneTimeAssistantToken).then(() => setNotice("助手 Token 已复制"))}
+                    className="mt-3 rounded-full border border-accent-green/25 px-3 py-1.5 text-xs text-accent-green"
+                  >
+                    复制 Token
+                  </button>
+                </div>
+              )}
+              <button
+                onClick={() => void issueExternalAssistantToken()}
+                disabled={saving || !assistantName.trim() || assistantScopes.length === 0}
+                className="rounded-full border border-accent-purple/25 bg-accent-purple/10 px-3 py-2 text-xs text-accent-purple disabled:opacity-40"
+              >
+                {assistantTokens.some((token) => !token.revokedAt && token.name === assistantName.trim()) ? "重置这个助手的 Token" : "生成助手 Token"}
+              </button>
+              {assistantTokens.length > 0 && (
+                <div className="mt-4 divide-y divide-white/[0.06] rounded-xl border border-white/[0.06] px-3">
+                  {assistantTokens.map((token) => (
+                    <div key={token.id} className="flex items-center justify-between gap-3 py-3 text-xs">
+                      <div className="min-w-0">
+                        <p className="truncate text-text-primary">{token.name} · 末四位 {token.last4}</p>
+                        <p className="mt-1 text-[10px] text-text-muted">
+                          {token.revokedAt ? "已撤销" : token.lastUsedAt ? `最近使用：${new Date(token.lastUsedAt).toLocaleString("zh-CN")}` : "尚未使用"}
+                        </p>
+                      </div>
+                      {!token.revokedAt && (
+                        <button onClick={() => void revokeExternalAssistantToken(token.id)} className="shrink-0 text-red-300 hover:text-red-200">撤销</button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+              {assistantAudit.length > 0 && (
+                <div className="mt-4">
+                  <p className="mb-2 text-[10px] tracking-[0.15em] text-text-muted">最近写入记录</p>
+                  <div className="divide-y divide-white/[0.06] rounded-xl border border-white/[0.06] px-3">
+                    {assistantAudit.slice(0, 5).map((event) => (
+                      <div key={event.id} className="py-2 text-[10px] text-text-muted">
+                        <span className="text-text-secondary">{event.assistantName}</span>
+                        {` · ${event.method} ${event.path} · ${event.responseStatus} · ${new Date(event.createdAt).toLocaleString("zh-CN")}`}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </section>
 
             {/* 管理员：创建用户 */}

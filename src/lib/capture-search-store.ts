@@ -449,7 +449,10 @@ function taskDetailRow(userId: string, id: string): TaskDetail | undefined {
     .prepare(
       `SELECT id, title, COALESCE(description, '') AS description, priority,
         status, scheduled_date, show_in_week_plan, project_id, due_date,
-        completed_at, created_at, updated_at
+        completed_at, estimated_minutes, execution_state, next_action,
+        done_definition, waiting_on, follow_up_date, blocker, task_level,
+        parent_task_id, origin_source, origin_ref, completion_outcome,
+        last_outcome_at, created_at, updated_at
        FROM tasks WHERE id = ? AND user_id = ?`
     )
     .get(id, userId) as
@@ -464,6 +467,19 @@ function taskDetailRow(userId: string, id: string): TaskDetail | undefined {
         project_id: string | null;
         due_date: string | null;
         completed_at: number | null;
+        estimated_minutes: number | null;
+        execution_state: "active" | "waiting" | "blocked";
+        next_action: string | null;
+        done_definition: string | null;
+        waiting_on: string | null;
+        follow_up_date: string | null;
+        blocker: string | null;
+        task_level: "milestone" | "task" | "action";
+        parent_task_id: string | null;
+        origin_source: string;
+        origin_ref: string | null;
+        completion_outcome: "done" | "dropped" | null;
+        last_outcome_at: number | null;
         created_at: number;
         updated_at: number;
       }
@@ -481,6 +497,19 @@ function taskDetailRow(userId: string, id: string): TaskDetail | undefined {
     projectId: row.project_id,
     dueDate: row.due_date,
     completedAt: row.completed_at,
+    estimatedMinutes: row.estimated_minutes,
+    executionState: row.execution_state,
+    nextAction: row.next_action,
+    doneDefinition: row.done_definition,
+    waitingOn: row.waiting_on,
+    followUpDate: row.follow_up_date,
+    blocker: row.blocker,
+    taskLevel: row.task_level,
+    parentTaskId: row.parent_task_id,
+    originSource: row.origin_source,
+    originRef: row.origin_ref,
+    completionOutcome: row.completion_outcome,
+    lastOutcomeAt: row.last_outcome_at,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };

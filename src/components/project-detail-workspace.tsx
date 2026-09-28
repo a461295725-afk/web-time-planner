@@ -23,6 +23,26 @@ import { ProjectItem, TaskItem } from "@/lib/mock-data";
 import { todayKey } from "@/lib/date";
 import { PublicSettings } from "@/lib/settings";
 
+function hierarchyRows(tasks: TaskItem[]): { task: TaskItem; depth: number }[] {
+  const byId = new Map(tasks.map((item) => [item.id, item]));
+  const children = new Map<string | null, TaskItem[]>();
+  for (const task of tasks) {
+    const parentId = task.parentTaskId && byId.has(task.parentTaskId) ? task.parentTaskId : null;
+    children.set(parentId, [...(children.get(parentId) ?? []), task]);
+  }
+  const seen = new Set<string>();
+  const rows: { task: TaskItem; depth: number }[] = [];
+  const visit = (task: TaskItem, depth: number) => {
+    if (seen.has(task.id)) return;
+    seen.add(task.id);
+    rows.push({ task, depth: Math.min(depth, 2) });
+    for (const child of children.get(task.id) ?? []) visit(child, depth + 1);
+  };
+  for (const root of children.get(null) ?? []) visit(root, 0);
+  for (const task of tasks) visit(task, 0);
+  return rows;
+}
+
 export default function ProjectDetailWorkspace({ projectId }: { projectId: string }) {
   const router = useRouter();
   const [project, setProject] = useState<ProjectItem | null>(null);
@@ -30,6 +50,8 @@ export default function ProjectDetailWorkspace({ projectId }: { projectId: strin
   const [name, setName] = useState("");
   const [note, setNote] = useState("");
   const [newTask, setNewTask] = useState("");
+  const [newTaskLevel, setNewTaskLevel] = useState<NonNullable<TaskItem["taskLevel"]>>("action");
+  const [newTaskParentId, setNewTaskParentId] = useState("");
   const [selectedTask, setSelectedTask] = useState<TaskItem | null>(null);
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [generating, setGenerating] = useState(false);
@@ -86,10 +108,12 @@ export default function ProjectDetailWorkspace({ projectId }: { projectId: strin
         title,
         projectId,
         priority: settings?.defaultPriority,
+        taskLevel: newTaskLevel,
+        parentTaskId: newTaskParentId || null,
       }),
     });
     setNewTask("");
-    setNotice("已加入项目子任务");
+    setNotice("已加入项目层级");
     await load();
   };
 
@@ -307,21 +331,19 @@ export default function ProjectDetailWorkspace({ projectId }: { projectId: strin
             <CalendarPlus className="h-4 w-4" />
             将子任务拖到这里安排到今日
           </div>
-          <form onSubmit={addTask} className="mb-3 flex gap-2">
-            <input
-              value={newTask}
-              onChange={(event) => setNewTask(event.target.value)}
-              placeholder="新增子任务"
-              className="min-w-0 flex-1 rounded-xl border border-white/[0.08] bg-black/20 px-3 py-2 text-sm outline-none placeholder:text-text-muted"
-            />
-            <button className="rounded-xl bg-accent-green/10 px-3 text-accent-green">
-              <Plus className="h-4 w-4" />
-            </button>
+          <form onSubmit={addTask} className="mb-3 grid gap-2 sm:grid-cols-[minmax(0,1fr)_110px_150px_auto]">
+            <input value={newTask} onChange={(event) => setNewTask(event.target.value)} placeholder="新增里程碑、任务或行动" className="min-w-0 rounded-xl border border-white/[0.08] bg-black/20 px-3 py-2 text-sm outline-none placeholder:text-text-muted" />
+            <select value={newTaskLevel} onChange={(event) => setNewTaskLevel(event.target.value as NonNullable<TaskItem["taskLevel"]>)} className="rounded-xl border border-white/[0.08] bg-black/20 px-2 py-2 text-xs text-text-secondary">
+              <option value="milestone">里程碑</option><option value="task">任务</option><option value="action">行动</option>
+            </select>
+            <select value={newTaskParentId} onChange={(event) => setNewTaskParentId(event.target.value)} className="min-w-0 rounded-xl border border-white/[0.08] bg-black/20 px-2 py-2 text-xs text-text-secondary">
+              <option value="">无上级</option>
+              {tasks.filter((task) => !task.done && task.taskLevel !== "action").map((task) => <option key={task.id} value={task.id}>{task.title}</option>)}
+            </select>
+            <button className="rounded-xl bg-accent-green/10 px-3 py-2 text-accent-green"><Plus className="h-4 w-4" /></button>
           </form>
           <div className="divide-y divide-white/[0.06]">
-            {[...tasks]
-              .sort((a, b) => Number(a.done) - Number(b.done))
-              .map((task) => (
+            {hierarchyRows(tasks).map(({ task, depth }) => (
               <div
                 key={task.id}
                 draggable
@@ -342,6 +364,7 @@ export default function ProjectDetailWorkspace({ projectId }: { projectId: strin
                   void patchTask(task.id, { done: !task.done });
                 }}
                 className="group flex cursor-grab items-center gap-2.5 py-3 text-sm active:cursor-grabbing"
+                style={{ paddingLeft: `${depth * 20}px` }}
               >
                 <GripVertical className="h-4 w-4 text-text-muted" />
                 {task.done ? (
@@ -350,7 +373,10 @@ export default function ProjectDetailWorkspace({ projectId }: { projectId: strin
                   <Circle className="h-4 w-4 text-text-muted" />
                 )}
                 <span className={`min-w-0 flex-1 ${task.done ? "text-text-muted line-through" : ""}`}>
+                  <span className="mr-2 rounded-full border border-white/[0.08] px-2 py-0.5 text-[9px] text-text-muted">{task.taskLevel === "milestone" ? "里程碑" : task.taskLevel === "task" ? "任务" : "行动"}</span>
                   {task.title}
+                  {task.executionState === "waiting" && <span className="ml-2 text-[10px] text-amber-300">等待</span>}
+                  {task.executionState === "blocked" && <span className="ml-2 text-[10px] text-red-300">阻塞</span>}
                 </span>
                 {task.showInWeekPlan ? (
                   <span className="shrink-0 rounded-full border border-accent-green/20 bg-accent-green/10 px-2.5 py-1 text-[10px] text-accent-green">
@@ -379,6 +405,14 @@ export default function ProjectDetailWorkspace({ projectId }: { projectId: strin
                 >
                   备注
                 </button>
+                <Link
+                  href={`/tasks/${task.id}`}
+                  onPointerDown={(event) => event.stopPropagation()}
+                  onClick={(event) => event.stopPropagation()}
+                  className="text-[11px] text-text-muted hover:text-accent-green"
+                >
+                  详情
+                </Link>
                 <button
                   onPointerDown={(event) => event.stopPropagation()}
                   onClick={(event) => {

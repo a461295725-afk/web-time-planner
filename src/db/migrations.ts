@@ -4,7 +4,7 @@ import { hashHermesToken, hermesTokenLast4 } from "@/lib/hermes-token";
 
 type SqliteDatabase = Database.Database;
 
-const CURRENT_VERSION = 7;
+const CURRENT_VERSION = 9;
 
 function tableColumns(sqlite: SqliteDatabase, table: string): string[] {
   return (sqlite.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).map(
@@ -511,6 +511,107 @@ function createV3PlanningTables(sqlite: SqliteDatabase): void {
   `);
 }
 
+function createV34GrokCollaborationTables(sqlite: SqliteDatabase): void {
+  const taskColumns: [string, string][] = [
+    ["execution_state", "TEXT NOT NULL DEFAULT 'active' CHECK(execution_state IN ('active', 'waiting', 'blocked'))"],
+    ["next_action", "TEXT"],
+    ["done_definition", "TEXT"],
+    ["waiting_on", "TEXT"],
+    ["follow_up_date", "TEXT"],
+    ["blocker", "TEXT"],
+    ["task_level", "TEXT NOT NULL DEFAULT 'action' CHECK(task_level IN ('milestone', 'task', 'action'))"],
+    ["parent_task_id", "TEXT REFERENCES tasks(id) ON DELETE SET NULL"],
+    ["origin_source", "TEXT NOT NULL DEFAULT 'manual'"],
+    ["origin_ref", "TEXT"],
+    ["completion_outcome", "TEXT CHECK(completion_outcome IN ('done', 'dropped'))"],
+    ["last_outcome_at", "INTEGER"],
+  ];
+  for (const [column, definition] of taskColumns) {
+    addColumn(sqlite, "tasks", column, definition);
+  }
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS assistant_api_tokens (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id),
+      name TEXT NOT NULL,
+      token_hash TEXT NOT NULL UNIQUE,
+      token_last4 TEXT NOT NULL,
+      scopes_json TEXT NOT NULL DEFAULT '[]',
+      created_at INTEGER NOT NULL,
+      last_used_at INTEGER,
+      revoked_at INTEGER,
+      UNIQUE(user_id, name)
+    );
+    CREATE TABLE IF NOT EXISTS assistant_idempotency (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id),
+      token_id TEXT NOT NULL,
+      idempotency_key TEXT NOT NULL,
+      request_fingerprint TEXT NOT NULL,
+      response_status INTEGER NOT NULL,
+      response_json TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      UNIQUE(token_id, idempotency_key)
+    );
+    CREATE TABLE IF NOT EXISTS task_outcomes (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id),
+      task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+      date TEXT NOT NULL,
+      outcome TEXT NOT NULL CHECK(outcome IN ('done', 'partial', 'postponed', 'dropped')),
+      note TEXT NOT NULL DEFAULT '',
+      next_action TEXT,
+      actual_minutes INTEGER,
+      source TEXT NOT NULL DEFAULT 'manual',
+      created_at INTEGER NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS workflow_templates (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id),
+      name TEXT NOT NULL,
+      description TEXT NOT NULL DEFAULT '',
+      steps_json TEXT NOT NULL DEFAULT '[]',
+      source TEXT NOT NULL DEFAULT 'manual',
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      UNIQUE(user_id, name)
+    );
+    CREATE INDEX IF NOT EXISTS idx_tasks_user_execution
+      ON tasks(user_id, execution_state, follow_up_date);
+    CREATE INDEX IF NOT EXISTS idx_tasks_user_parent
+      ON tasks(user_id, parent_task_id, task_level);
+    CREATE INDEX IF NOT EXISTS idx_assistant_tokens_user_active
+      ON assistant_api_tokens(user_id, revoked_at);
+    CREATE INDEX IF NOT EXISTS idx_assistant_idempotency_user_created
+      ON assistant_idempotency(user_id, created_at);
+    CREATE INDEX IF NOT EXISTS idx_task_outcomes_user_date
+      ON task_outcomes(user_id, date);
+    CREATE INDEX IF NOT EXISTS idx_task_outcomes_task_created
+      ON task_outcomes(task_id, created_at);
+  `);
+}
+
+function createAssistantAuditTable(sqlite: SqliteDatabase): void {
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS assistant_audit_events (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id),
+      token_id TEXT NOT NULL,
+      assistant_name TEXT NOT NULL,
+      method TEXT NOT NULL,
+      path TEXT NOT NULL,
+      idempotency_key TEXT NOT NULL,
+      request_fingerprint TEXT NOT NULL,
+      response_status INTEGER NOT NULL,
+      created_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_assistant_audit_user_created
+      ON assistant_audit_events(user_id, created_at);
+    CREATE INDEX IF NOT EXISTS idx_assistant_audit_token_created
+      ON assistant_audit_events(token_id, created_at);
+  `);
+}
+
 function applyMigration(sqlite: SqliteDatabase, version: number): void {
   switch (version) {
     case 1: createBaseTables(sqlite); break;
@@ -520,6 +621,8 @@ function applyMigration(sqlite: SqliteDatabase, version: number): void {
     case 5: migrateLegacyHermesTokens(sqlite); break;
     case 6: ensureLegacyHermesTable(sqlite); break;
     case 7: createV3PlanningTables(sqlite); break;
+    case 8: createV34GrokCollaborationTables(sqlite); break;
+    case 9: createAssistantAuditTable(sqlite); break;
     default: throw new Error(`未知数据库迁移版本：${version}`);
   }
 }

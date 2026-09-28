@@ -11,6 +11,7 @@
 - 计划先预览、后确认；AI 不可用时自动使用确定性规则安排。
 - 专注计时、每日/每周复盘、显式任务结转和停滞项目提醒。
 - 长期记忆支持查看、确认、修改和删除，并严格按账号隔离。
+- 可给 Grok 等外部助手签发独立权限 Token，在确认后代为安排、记录结果、复盘和应用流程模板。
 - 用户数据导出会排除密码、会话、API Key 和其他敏感信息。
 
 ## 技术栈
@@ -52,4 +53,6 @@ docker compose up -d --build
 
 - [`specs/time-planner-v3.md`](specs/time-planner-v3.md)：V3 功能范围与验收标准。
 - [`docs/smart-day-api.md`](docs/smart-day-api.md)：智能今天接口约定。
+- [`docs/grok-assistant-api.md`](docs/grok-assistant-api.md)：外部助手接入、确认边界与接口示例。
+- [`skills/grok-time-planner/SKILL.md`](skills/grok-time-planner/SKILL.md)：可直接提供给 Grok Bot 的行为说明。
 - [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md)：V3 实施记录。

@@ -123,6 +123,19 @@ export interface TaskDetail {
   projectId: string | null;
   dueDate: string | null;
   completedAt: number | null;
+  estimatedMinutes: number | null;
+  executionState: "active" | "waiting" | "blocked";
+  nextAction: string | null;
+  doneDefinition: string | null;
+  waitingOn: string | null;
+  followUpDate: string | null;
+  blocker: string | null;
+  taskLevel: "milestone" | "task" | "action";
+  parentTaskId: string | null;
+  originSource: string;
+  originRef: string | null;
+  completionOutcome: "done" | "dropped" | null;
+  lastOutcomeAt: number | null;
   createdAt: number;
   updatedAt: number;
 }

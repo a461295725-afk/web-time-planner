@@ -27,6 +27,18 @@ export interface TaskItem {
   energyLevel?: "low" | "medium" | "high";
   preferredPeriod?: "morning" | "afternoon" | "evening" | "anytime";
   completedAt?: number;
+  executionState?: "active" | "waiting" | "blocked";
+  nextAction?: string;
+  doneDefinition?: string;
+  waitingOn?: string;
+  followUpDate?: string;
+  blocker?: string;
+  taskLevel?: "milestone" | "task" | "action";
+  parentTaskId?: string;
+  originSource?: string;
+  originRef?: string;
+  completionOutcome?: "done" | "dropped";
+  lastOutcomeAt?: number;
 }
 
 export interface ProjectItem {

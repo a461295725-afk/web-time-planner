@@ -33,6 +33,18 @@ const tests: TestCase[] = [
           "energy_level",
           "preferred_period",
           "completed_at",
+          "execution_state",
+          "next_action",
+          "done_definition",
+          "waiting_on",
+          "follow_up_date",
+          "blocker",
+          "task_level",
+          "parent_task_id",
+          "origin_source",
+          "origin_ref",
+          "completion_outcome",
+          "last_outcome_at",
         ]) {
           assert(taskColumns.has(column), `tasks.${column} should exist`);
         }
@@ -52,10 +64,15 @@ const tests: TestCase[] = [
           "reviews",
           "task_carryovers",
           "agent_memories",
+          "assistant_api_tokens",
+          "assistant_idempotency",
+          "assistant_audit_events",
+          "task_outcomes",
+          "workflow_templates",
         ]) {
           assert(tables.has(table), `${table} should exist`);
         }
-        assert.equal(migrationVersion(), 7);
+        assert.equal(migrationVersion(), 9);
       } finally {
         database.close();
         rmSync(path, { force: true });
