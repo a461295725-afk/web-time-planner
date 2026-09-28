@@ -50,3 +50,5 @@
 - 2026-09-28：镜像 `time-planner-app:v34-1efbdbd` 已部署，生产启动日志确认迁移版本 11；容器重启次数为 0，近十分钟错误扫描为空，Cloudflare Tunnel 在线。
 - 2026-09-28：公网登录页返回 200；未授权的助手上下文、`freebusy` 和 `smart-day` 均返回 401。旧镜像保留为 `rollback-pre-1efbdbd`。
 - 2026-09-28：服务器源码同步永久排除 `.env`、`data/`、`backups/` 和 `.git`；历史备份、生产数据与凭据均未清理或导出。
+- 2026-09-28：官方 npm 审计确认生产依赖漏洞为 0；构建提示的 4 个 moderate 全部来自开发工具链。提交 `476e0ea` 将 Dockerfile 改为多阶段构建，运行镜像不再包含 `drizzle-kit`、`esbuild`、`tsx`、Python 或 C++ 编译器。
+- 2026-09-28：最终生产镜像 `time-planner-app:v34-476e0ea` 约 296 MB（上一镜像约 605 MB），迁移版本仍为 11，容器重启次数为 0，错误扫描为空，公网验收保持 200/401；切换前镜像保留为 `rollback-pre-476e0ea`。
