@@ -106,7 +106,7 @@ GET /api/smart-day/feedback?since=毫秒时间戳
 
 生成、确认、接受、拒绝、移动、专注开始/停止/取消等动作由服务端自动记录。事件只包含结构化 ID、时段和时长，不包含 AI 密钥或完整 Prompt。
 
-## Hermes 只读摘要
+## Hermes / 外部助手只读摘要
 
 ```text
 GET /api/v1/smart-day?date=2026-08-24&kind=morning
@@ -120,13 +120,13 @@ GET /api/v1/smart-day?date=2026-08-24&kind=evening
 - `overdue`：逾期任务、优先级、截止日期和预计时长。
 - `evening`：完成数、完成任务、未完成任务、计划分钟和实际专注分钟。
 
-这些 GET 请求不会确认计划、改变任务日期、完成任务或写入结转。Hermes 负责定时轮询和发送消息，Time Planner 本身不运行后台定时器。
+这些 GET 请求接受 Hermes Token，或具备 `context:read` 的外部助手 Token。它们不会确认计划、改变任务日期、完成任务或写入结转。Hermes 负责定时轮询和发送消息，Time Planner 本身不运行后台定时器。
 
-## Hermes 范围忙闲
+## Hermes / 外部助手范围忙闲
 
 ```text
 GET /api/v1/freebusy?from=2026-09-01&to=2026-09-07
-X-API-Token: <用户的 Hermes Token>
+X-API-Token: <用户的 Hermes Token 或具备 context:read 的助手 Token>
 ```
 
 `from` 和 `to` 都是必填的闭区间日期，单次最多查询 31 天，因此可覆盖一周或一个月。时区固定为 `Asia/Shanghai`，接口不会接受或伪装其他时区。

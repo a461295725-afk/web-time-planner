@@ -1,11 +1,13 @@
 import { requireHermesToken } from "@/lib/hermes-auth";
+import { requireAssistantToken } from "@/lib/assistant-auth";
 import { getProjects, createProject } from "@/lib/server-store";
 import { isDateKey } from "@/lib/validation";
 
 export const runtime = "nodejs";
 
 export async function GET(request: Request) {
-  const auth = requireHermesToken(request);
+  const auth =
+    requireAssistantToken(request, "context:read") ?? requireHermesToken(request);
   if (!auth) return Response.json({ error: "未授权" }, { status: 401 });
 
   const projects = getProjects(auth.userId);

@@ -5,6 +5,7 @@ import {
   runAssistantMutationAsync,
 } from "@/lib/assistant-idempotency";
 import { todayKey } from "@/lib/date";
+import { parseJsonBody, requestJsonErrorResponse } from "@/lib/request-json";
 import { createDayPlanDraft, smartDayErrorResponse } from "@/lib/smart-day-store";
 
 export const runtime = "nodejs";
@@ -14,7 +15,9 @@ export async function POST(request: Request) {
   const auth = requireAssistantToken(request, "plans:write");
   if (!auth) return Response.json({ error: "未授权" }, { status: 401 });
   try {
-    const input = (await request.json()) as Record<string, unknown>;
+    const input = await parseJsonBody<Record<string, unknown>>(request, {
+      requireJsonContentType: true,
+    });
     if (
       input.taskIds !== undefined &&
       (!Array.isArray(input.taskIds) || input.taskIds.some((id) => typeof id !== "string"))
@@ -24,6 +27,9 @@ export async function POST(request: Request) {
     if (input.useAi !== undefined && typeof input.useAi !== "boolean") {
       return Response.json({ error: "useAi 无效" }, { status: 400 });
     }
+    if (input.replaceConfirmed !== undefined && typeof input.replaceConfirmed !== "boolean") {
+      return Response.json({ error: "replaceConfirmed 无效" }, { status: 400 });
+    }
     const result = await runAssistantMutationAsync(request, auth, input, async () => ({
       status: 201,
       body: await createDayPlanDraft(
@@ -32,11 +38,14 @@ export async function POST(request: Request) {
         {
           taskIds: input.taskIds as string[] | undefined,
           useAi: input.useAi as boolean | undefined,
+          replaceConfirmed: input.replaceConfirmed as boolean | undefined,
         }
       ),
     }));
     return idempotentResponse(result);
   } catch (error) {
+    const jsonError = requestJsonErrorResponse(error);
+    if (jsonError) return jsonError;
     if (error instanceof AssistantIdempotencyError) {
       return Response.json({ error: error.message }, { status: error.status });
     }

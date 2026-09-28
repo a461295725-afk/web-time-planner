@@ -1,11 +1,14 @@
-import { requireAssistantToken } from "@/lib/assistant-auth";
+import {
+  forbidAssistantDelete,
+  requireAssistantToken,
+} from "@/lib/assistant-auth";
 import {
   AssistantIdempotencyError,
   idempotentResponse,
   runAssistantMutation,
 } from "@/lib/assistant-idempotency";
+import { parseJsonBody, requestJsonErrorResponse } from "@/lib/request-json";
 import {
-  deleteWorkflowTemplate,
   listWorkflowTemplates,
   saveWorkflowTemplate,
 } from "@/lib/workflow-template-store";
@@ -14,6 +17,8 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 function errorResponse(error: unknown): Response {
+  const jsonError = requestJsonErrorResponse(error);
+  if (jsonError) return jsonError;
   if (error instanceof AssistantIdempotencyError) {
     return Response.json({ error: error.message }, { status: error.status });
   }
@@ -33,7 +38,9 @@ export async function POST(request: Request) {
   const auth = requireAssistantToken(request, "templates:write");
   if (!auth) return Response.json({ error: "未授权" }, { status: 401 });
   try {
-    const input = (await request.json()) as Record<string, unknown>;
+    const input = await parseJsonBody<Record<string, unknown>>(request, {
+      requireJsonContentType: true,
+    });
     return idempotentResponse(
       runAssistantMutation(request, auth, input, () => ({
         status: 201,
@@ -51,22 +58,6 @@ export async function POST(request: Request) {
 }
 
 export async function DELETE(request: Request) {
-  const auth = requireAssistantToken(request, "templates:write");
-  if (!auth) return Response.json({ error: "未授权" }, { status: 401 });
-  try {
-    const input = (await request.json()) as Record<string, unknown>;
-    if (typeof input.id !== "string") {
-      return Response.json({ error: "缺少流程模板 ID" }, { status: 400 });
-    }
-    return idempotentResponse(
-      runAssistantMutation(request, auth, input, () => {
-        const deleted = deleteWorkflowTemplate(auth.userId, input.id as string);
-        return deleted
-          ? { status: 200, body: { ok: true } }
-          : { status: 404, body: { error: "流程模板不存在" } };
-      })
-    );
-  } catch (error) {
-    return errorResponse(error);
-  }
+  const forbidden = forbidAssistantDelete(request);
+  return forbidden ?? Response.json({ error: "未授权" }, { status: 401 });
 }

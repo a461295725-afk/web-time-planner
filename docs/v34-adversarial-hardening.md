@@ -1,0 +1,34 @@
+# V3.4 助手接口对抗修复
+
+状态：本地实现与验收完成，待生产部署验收
+
+基线：`63741fd`（Next.js 16.3.6 安全补丁版）
+
+## 已批准范围
+
+- 已确认计划默认禁止被新草稿覆盖；显式重排时保存完整确认版本历史。
+- `dropped` 关闭任务但不计为完成；复盘区分完成、部分、推迟和放弃。
+- `partial` 必须有下一步，允许当天继续；`postponed` 必须安排到未来日期。
+- 统一任务字段长度、JSON 请求体、助手删除权限和不存在资源的响应。
+- 调整计划项后重算摘要；空 `taskIds` 不创建计划。
+- 助手 token 仅扩展到旧 `smart-day`、`freebusy`、`projects` 的只读 GET。
+
+## 不可改内容
+
+- 不重建 `tasks`、`day_plans`、`day_plan_items`。
+- 不访问或清理生产测试数据、真实数据库、令牌和凭据。
+- 不新增后台 scheduler、MCP、webhook 或另一套日历产品。
+
+## 验收顺序
+
+1. 对抗回归测试逐条红→绿。
+2. `npm test`。
+3. `npx tsc --noEmit --incremental false`。
+4. `npx next build --webpack`。
+5. 数据库副本候选容器验证后再部署。
+
+## 当前进度
+
+- 2026-09-28：完成反馈与现有代码核验，开始 P0 已确认计划保护。
+- 2026-09-28：已完成确认计划版本保护、结果语义与复盘统计、任务文本限制、助手删除隔离、严格 JSON、计划摘要重算、缺失任务 404、旧只读接口兼容和迁移 v10。
+- 2026-09-28：`npm test`、`npx tsc --noEmit --incremental false`、`npx next build --webpack` 与 `git diff --check` 已通过；VPS 候选验证待执行。

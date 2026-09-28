@@ -244,6 +244,32 @@ export const dayPlanItems = sqliteTable(
   })
 );
 
+export const dayPlanRevisions = sqliteTable(
+  "day_plan_revisions",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id").notNull().references(() => users.id),
+    planId: text("plan_id").notNull(),
+    date: text("date").notNull(),
+    version: integer("version").notNull(),
+    snapshotJson: text("snapshot_json").notNull(),
+    confirmedAt: integer("confirmed_at"),
+    archivedAt: integer("archived_at").notNull(),
+  },
+  (table) => ({
+    planVersion: uniqueIndex("idx_day_plan_revisions_plan_version").on(
+      table.userId,
+      table.planId,
+      table.version
+    ),
+    userDate: index("idx_day_plan_revisions_user_date").on(
+      table.userId,
+      table.date,
+      table.version
+    ),
+  })
+);
+
 export const focusSessions = sqliteTable(
   "focus_sessions",
   {
@@ -439,6 +465,10 @@ export const taskOutcomes = sqliteTable(
     note: text("note").notNull().default(""),
     nextAction: text("next_action"),
     actualMinutes: integer("actual_minutes"),
+    rescheduleDate: text("reschedule_date"),
+    waitingOn: text("waiting_on"),
+    followUpDate: text("follow_up_date"),
+    blocker: text("blocker"),
     source: text("source").notNull().default("manual"),
     createdAt: integer("created_at").notNull(),
   },

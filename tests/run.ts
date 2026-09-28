@@ -69,10 +69,37 @@ const tests: TestCase[] = [
           "assistant_audit_events",
           "task_outcomes",
           "workflow_templates",
+          "day_plan_revisions",
         ]) {
           assert(tables.has(table), `${table} should exist`);
         }
-        assert.equal(migrationVersion(), 9);
+
+        const outcomeColumns = new Set(
+          (
+            database.prepare("PRAGMA table_info(task_outcomes)").all() as {
+              name: string;
+            }[]
+          ).map((column) => column.name)
+        );
+        for (const column of [
+          "reschedule_date",
+          "waiting_on",
+          "follow_up_date",
+          "blocker",
+        ]) {
+          assert(outcomeColumns.has(column), `task_outcomes.${column} should exist`);
+        }
+
+        const revisionIndexes = new Set(
+          (
+            database
+              .prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'day_plan_revisions'")
+              .all() as { name: string }[]
+          ).map((row) => row.name)
+        );
+        assert(revisionIndexes.has("idx_day_plan_revisions_plan_version"));
+        assert(revisionIndexes.has("idx_day_plan_revisions_user_date"));
+        assert.equal(migrationVersion(), 10);
       } finally {
         database.close();
         rmSync(path, { force: true });

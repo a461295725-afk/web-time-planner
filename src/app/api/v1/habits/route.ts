@@ -1,4 +1,5 @@
 import { requireHermesToken } from "@/lib/hermes-auth";
+import { forbidAssistantDelete } from "@/lib/assistant-auth";
 import { getHabits, createHabit, deleteHabit } from "@/lib/server-store";
 import { todayKey } from "@/lib/date";
 import { isDateKey } from "@/lib/validation";
@@ -33,6 +34,9 @@ export async function POST(request: Request) {
 }
 
 export async function DELETE(request: Request) {
+  const forbidden = forbidAssistantDelete(request);
+  if (forbidden) return forbidden;
+
   const auth = requireHermesToken(request);
   if (!auth) return Response.json({ error: "未授权" }, { status: 401 });
 

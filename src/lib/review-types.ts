@@ -8,6 +8,9 @@ export interface ReviewMetrics {
   plannedCount: number;
   plannedDoneCount: number;
   completedCount: number;
+  droppedCount: number;
+  partialCount: number;
+  postponedCount: number;
   plannedMinutes: number;
   focusedMinutes: number;
   habitCompleted: number;

@@ -16,6 +16,7 @@ import {
   SmartDayFeedbackEvent,
   SmartDayItemActionInput,
   SmartDayPlan,
+  SmartDayPlanRevision,
   SmartDayPlanItem,
   SmartDaySettings,
   SmartDaySnapshot,
@@ -336,7 +337,9 @@ function getOwnedTasks(userId: string, ids: string[]): SmartDayTask[] {
   const rows = sqlite
     .prepare(`${taskSelect()} WHERE user_id = ? AND id IN (${placeholders})`)
     .all(userId, ...uniqueIds) as TaskRow[];
-  if (rows.length !== uniqueIds.length) throw new SmartDayError("存在不属于当前用户的任务", 403);
+  if (rows.length !== uniqueIds.length) {
+    throw new SmartDayError("任务不存在或不可访问", 404);
+  }
   const byId = new Map(rows.map((row) => [row.id, mapTask(row)]));
   return uniqueIds.map((id) => byId.get(id)!);
 }
@@ -624,9 +627,16 @@ function validateDraftForPersistence(
 export async function createDayPlanDraft(
   userId: string,
   dateInput: string,
-  input: { taskIds?: string[]; useAi?: boolean } = {}
+  input: { taskIds?: string[]; useAi?: boolean; replaceConfirmed?: boolean } = {}
 ): Promise<SmartDayDraftResult> {
   const date = requireDate(dateInput);
+  if (input.taskIds && input.taskIds.length === 0) {
+    throw new SmartDayError("taskIds 不能为空");
+  }
+  const currentPlan = getPlanByDate(userId, date);
+  if (currentPlan?.status === "confirmed" && input.replaceConfirmed !== true) {
+    throw new SmartDayError("该日期计划已确认，不能直接覆盖", 409);
+  }
   const settings = getSmartDaySettings(userId);
   const tasks = input.taskIds
     ? getOwnedTasks(userId, input.taskIds).filter((task) => !task.done)
@@ -658,10 +668,37 @@ export async function createDayPlanDraft(
   const unassignedTaskIds = tasks.filter((task) => !selected.has(task.id)).map((task) => task.id);
   const timestamp = now();
   let planId = "";
+  let previousConfirmedVersion: number | undefined;
   sqlite.transaction(() => {
     const existing = sqlite
-      .prepare("SELECT id, version, created_at FROM day_plans WHERE user_id = ? AND date = ?")
-      .get(userId, date) as { id: string; version: number; created_at: number } | undefined;
+      .prepare("SELECT id, status, version, created_at FROM day_plans WHERE user_id = ? AND date = ?")
+      .get(userId, date) as
+      | { id: string; status: "draft" | "confirmed" | "rejected"; version: number; created_at: number }
+      | undefined;
+    if (existing?.status === "confirmed") {
+      if (input.replaceConfirmed !== true) {
+        throw new SmartDayError("该日期计划已确认，不能直接覆盖", 409);
+      }
+      const confirmed = getPlanByDate(userId, date);
+      if (!confirmed) throw new SmartDayError("已确认计划读取失败", 500);
+      previousConfirmedVersion = confirmed.version;
+      sqlite
+        .prepare(
+          `INSERT OR IGNORE INTO day_plan_revisions
+           (id, user_id, plan_id, date, version, snapshot_json, confirmed_at, archived_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+        )
+        .run(
+          randomUUID(),
+          userId,
+          confirmed.id,
+          confirmed.date,
+          confirmed.version,
+          JSON.stringify(confirmed),
+          confirmed.confirmedAt ?? null,
+          timestamp
+        );
+    }
     planId = existing?.id ?? randomUUID();
     const version = (existing?.version ?? 0) + 1;
     if (existing) {
@@ -711,7 +748,36 @@ export async function createDayPlanDraft(
   broadcastChange(userId);
   const plan = getPlanById(userId, planId);
   if (!plan) throw new SmartDayError("计划生成失败", 500);
-  return { plan, unassignedTaskIds, warnings, usedAi };
+  return { plan, unassignedTaskIds, warnings, usedAi, previousConfirmedVersion };
+}
+
+export function listDayPlanRevisions(userId: string, dateInput: string): SmartDayPlanRevision[] {
+  const date = requireDate(dateInput);
+  const rows = sqlite
+    .prepare(
+      `SELECT id, plan_id, date, version, snapshot_json, confirmed_at, archived_at
+       FROM day_plan_revisions
+       WHERE user_id = ? AND date = ?
+       ORDER BY version DESC, archived_at DESC`
+    )
+    .all(userId, date) as {
+    id: string;
+    plan_id: string;
+    date: string;
+    version: number;
+    snapshot_json: string;
+    confirmed_at: number | null;
+    archived_at: number;
+  }[];
+  return rows.map((row) => ({
+    id: row.id,
+    planId: row.plan_id,
+    date: row.date,
+    version: row.version,
+    snapshot: JSON.parse(row.snapshot_json) as SmartDayPlan,
+    confirmedAt: row.confirmed_at ?? undefined,
+    archivedAt: row.archived_at,
+  }));
 }
 
 export function getSmartDaySnapshot(userId: string, dateInput: string): SmartDaySnapshot {
@@ -767,6 +833,30 @@ function validateItemTime(
   if (!window || startMinute < window.startMinute || endMinute > window.endMinute) {
     throw new SmartDayError("安排时间超出对应时段");
   }
+}
+
+function recomputePlanSummaryInTransaction(
+  userId: string,
+  planId: string,
+  timestamp: number
+): void {
+  const totals = sqlite
+    .prepare(
+      `SELECT COUNT(*) AS item_count,
+        COALESCE(SUM(end_minute - start_minute), 0) AS total_minutes
+       FROM day_plan_items
+       WHERE plan_id = ? AND user_id = ? AND status <> 'rejected'`
+    )
+    .get(planId, userId) as { item_count: number; total_minutes: number };
+  const summary =
+    totals.item_count > 0
+      ? `已安排 ${totals.item_count} 项，共 ${totals.total_minutes} 分钟`
+      : "今天暂无可安排任务";
+  sqlite
+    .prepare(
+      "UPDATE day_plans SET summary = ?, updated_at = ? WHERE id = ? AND user_id = ?"
+    )
+    .run(summary, timestamp, planId, userId);
 }
 
 export function updateSmartDayItem(
@@ -839,7 +929,7 @@ export function updateSmartDayItem(
       .all(plan.id, userId) as { id: string }[];
     const updatePosition = sqlite.prepare("UPDATE day_plan_items SET position = ?, updated_at = ? WHERE id = ? AND user_id = ?");
     rows.forEach((row, index) => updatePosition.run(index, timestamp, row.id, userId));
-    sqlite.prepare("UPDATE day_plans SET updated_at = ? WHERE id = ? AND user_id = ?").run(timestamp, plan.id, userId);
+    recomputePlanSummaryInTransaction(userId, plan.id, timestamp);
   })();
   broadcastChange(userId);
   const changed = itemRow(userId, itemId);

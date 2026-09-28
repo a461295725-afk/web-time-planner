@@ -5,6 +5,7 @@ import {
   runAssistantMutation,
 } from "@/lib/assistant-idempotency";
 import { todayKey } from "@/lib/date";
+import { parseJsonBody, requestJsonErrorResponse } from "@/lib/request-json";
 import { getReview, listReviews, saveReview } from "@/lib/review-store";
 import type { ReviewPeriodType } from "@/lib/review-types";
 
@@ -43,7 +44,9 @@ export async function POST(request: Request) {
   const auth = requireAssistantToken(request, "reviews:write");
   if (!auth) return Response.json({ error: "未授权" }, { status: 401 });
   try {
-    const input = (await request.json()) as Record<string, unknown>;
+    const input = await parseJsonBody<Record<string, unknown>>(request, {
+      requireJsonContentType: true,
+    });
     if (input.periodType !== "daily" && input.periodType !== "weekly") {
       return Response.json({ error: "复盘周期无效" }, { status: 400 });
     }
@@ -64,6 +67,8 @@ export async function POST(request: Request) {
       }))
     );
   } catch (error) {
+    const jsonError = requestJsonErrorResponse(error);
+    if (jsonError) return jsonError;
     if (error instanceof AssistantIdempotencyError) {
       return Response.json({ error: error.message }, { status: error.status });
     }

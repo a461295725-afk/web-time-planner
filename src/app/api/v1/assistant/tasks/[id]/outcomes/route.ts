@@ -4,9 +4,11 @@ import {
   idempotentResponse,
   runAssistantMutation,
 } from "@/lib/assistant-idempotency";
+import { parseJsonBody, requestJsonErrorResponse } from "@/lib/request-json";
 import {
   listTaskOutcomes,
   recordTaskOutcome,
+  TaskExecutionError,
   type TaskOutcomeKind,
 } from "@/lib/task-execution-store";
 
@@ -16,6 +18,11 @@ export const dynamic = "force-dynamic";
 type Params = { params: Promise<{ id: string }> };
 
 function errorResponse(error: unknown): Response {
+  const jsonError = requestJsonErrorResponse(error);
+  if (jsonError) return jsonError;
+  if (error instanceof TaskExecutionError) {
+    return Response.json({ error: error.message }, { status: error.status });
+  }
   if (error instanceof AssistantIdempotencyError) {
     return Response.json({ error: error.message }, { status: error.status });
   }
@@ -28,8 +35,12 @@ function errorResponse(error: unknown): Response {
 export async function GET(request: Request, { params }: Params) {
   const auth = requireAssistantToken(request, "context:read");
   if (!auth) return Response.json({ error: "未授权" }, { status: 401 });
-  const { id } = await params;
-  return Response.json({ outcomes: listTaskOutcomes(auth.userId, id) });
+  try {
+    const { id } = await params;
+    return Response.json({ outcomes: listTaskOutcomes(auth.userId, id) });
+  } catch (error) {
+    return errorResponse(error);
+  }
 }
 
 export async function POST(request: Request, { params }: Params) {
@@ -37,7 +48,9 @@ export async function POST(request: Request, { params }: Params) {
   if (!auth) return Response.json({ error: "未授权" }, { status: 401 });
   try {
     const { id } = await params;
-    const input = (await request.json()) as Record<string, unknown>;
+    const input = await parseJsonBody<Record<string, unknown>>(request, {
+      requireJsonContentType: true,
+    });
     return idempotentResponse(
       runAssistantMutation(request, auth, input, () => ({
         status: 201,

@@ -1,5 +1,9 @@
 import { requireHermesToken } from "@/lib/hermes-auth";
 import {
+  forbidAssistantDelete,
+  requireAssistantToken,
+} from "@/lib/assistant-auth";
+import {
   projectDetails,
   updateProject,
   deleteProject,
@@ -12,7 +16,8 @@ export async function GET(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const auth = requireHermesToken(request);
+  const auth =
+    requireAssistantToken(request, "context:read") ?? requireHermesToken(request);
   if (!auth) return Response.json({ error: "未授权" }, { status: 401 });
 
   const { id } = await params;
@@ -57,6 +62,9 @@ export async function DELETE(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const forbidden = forbidAssistantDelete(request);
+  if (forbidden) return forbidden;
+
   const auth = requireHermesToken(request);
   if (!auth) return Response.json({ error: "未授权" }, { status: 401 });
 

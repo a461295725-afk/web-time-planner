@@ -35,6 +35,7 @@ type TaskStatsRow = {
   status: "todo" | "done" | "overdue";
   estimated_minutes: number | null;
   completed_at: number | null;
+  completion_outcome: "done" | "dropped" | null;
 };
 
 type CarryoverRow = {
@@ -66,6 +67,10 @@ type ProjectTaskRow = {
 type HabitCountRow = { date: string; count: number };
 type FocusCountRow = { date: string; seconds: number | null };
 type CarryoverCountRow = { source_date: string; count: number };
+type LatestOutcomeCountRow = {
+  date: string;
+  outcome: "done" | "partial" | "postponed" | "dropped";
+};
 
 const CHINA_TIME_ZONE = "Asia/Shanghai";
 const DATE_FORMATTER = new Intl.DateTimeFormat("en-CA", {
@@ -154,6 +159,9 @@ function emptyMetrics(start: string, end: string): ReviewMetrics {
     plannedCount: 0,
     plannedDoneCount: 0,
     completedCount: 0,
+    droppedCount: 0,
+    partialCount: 0,
+    postponedCount: 0,
     plannedMinutes: 0,
     focusedMinutes: 0,
     habitCompleted: 0,
@@ -185,6 +193,9 @@ function parseStoredMetrics(value: string, start: string, end: string): ReviewMe
         plannedCount: parsed.plannedCount,
         plannedDoneCount: parsed.plannedDoneCount,
         completedCount: parsed.completedCount,
+        droppedCount: parsed.droppedCount ?? 0,
+        partialCount: parsed.partialCount ?? 0,
+        postponedCount: parsed.postponedCount ?? 0,
         plannedMinutes: parsed.plannedMinutes,
         focusedMinutes: parsed.focusedMinutes,
         habitCompleted: parsed.habitCompleted,
@@ -279,7 +290,7 @@ export function getReviewStats(userId: string, requestedFrom: string, requestedT
 
   const tasks = sqlite
     .prepare(
-      `SELECT id, scheduled_date, status, estimated_minutes, completed_at
+      `SELECT id, scheduled_date, status, estimated_minutes, completed_at, completion_outcome
        FROM tasks
        WHERE user_id = ?
          AND (scheduled_date BETWEEN ? AND ? OR completed_at BETWEEN ? AND ?)`
@@ -290,14 +301,38 @@ export function getReviewStats(userId: string, requestedFrom: string, requestedT
     if (task.scheduled_date && metricsByDate.has(task.scheduled_date)) {
       const metrics = metricsByDate.get(task.scheduled_date)!;
       metrics.plannedCount += 1;
-      if (task.status === "done") metrics.plannedDoneCount += 1;
+      if (task.status === "done" && task.completion_outcome !== "dropped") {
+        metrics.plannedDoneCount += 1;
+      }
       metrics.plannedMinutes += task.estimated_minutes ?? 0;
     }
-    if (task.completed_at !== null) {
+    if (task.completed_at !== null && task.completion_outcome !== "dropped") {
       const completedDate = dateFromTimestamp(task.completed_at);
       const metrics = metricsByDate.get(completedDate);
       if (metrics) metrics.completedCount += 1;
     }
+  }
+
+  const latestOutcomeRows = sqlite
+    .prepare(
+      `WITH ranked AS (
+         SELECT date, outcome,
+           ROW_NUMBER() OVER (
+             PARTITION BY task_id, date
+             ORDER BY created_at DESC, rowid DESC
+           ) AS outcome_rank
+         FROM task_outcomes
+         WHERE user_id = ? AND date BETWEEN ? AND ?
+       )
+       SELECT date, outcome FROM ranked WHERE outcome_rank = 1`
+    )
+    .all(userId, from, to) as LatestOutcomeCountRow[];
+  for (const row of latestOutcomeRows) {
+    const metrics = metricsByDate.get(row.date);
+    if (!metrics) continue;
+    if (row.outcome === "dropped") metrics.droppedCount += 1;
+    if (row.outcome === "partial") metrics.partialCount += 1;
+    if (row.outcome === "postponed") metrics.postponedCount += 1;
   }
 
   const focusRows = sqlite
@@ -356,6 +391,9 @@ export function getReviewStats(userId: string, requestedFrom: string, requestedT
       plannedCount: sum.plannedCount + day.plannedCount,
       plannedDoneCount: sum.plannedDoneCount + day.plannedDoneCount,
       completedCount: sum.completedCount + day.completedCount,
+      droppedCount: sum.droppedCount + day.droppedCount,
+      partialCount: sum.partialCount + day.partialCount,
+      postponedCount: sum.postponedCount + day.postponedCount,
       plannedMinutes: sum.plannedMinutes + day.plannedMinutes,
       focusedMinutes: sum.focusedMinutes + day.focusedMinutes,
       habitCompleted: sum.habitCompleted + day.habitCompleted,

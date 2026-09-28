@@ -1,10 +1,14 @@
 import { requireHermesToken } from "@/lib/hermes-auth";
-import { requireAssistantToken } from "@/lib/assistant-auth";
+import {
+  forbidAssistantDelete,
+  requireAssistantToken,
+} from "@/lib/assistant-auth";
 import {
   AssistantIdempotencyError,
   idempotentResponse,
   runAssistantMutation,
 } from "@/lib/assistant-idempotency";
+import { parseJsonBody, requestJsonErrorResponse } from "@/lib/request-json";
 import {
   createTask,
   getTasks,
@@ -12,9 +16,12 @@ import {
   deleteTask,
 } from "@/lib/server-store";
 import { todayKey } from "@/lib/date";
-import { isDateKey, isPriority } from "@/lib/validation";
+import { isDateKey, isPriority, validateTaskFields } from "@/lib/validation";
 
 export const runtime = "nodejs";
+
+type TaskCreateRequest = Parameters<typeof createTask>[1];
+type TaskUpdateRequest = Parameters<typeof updateTask>[2] & { id?: unknown };
 
 function taskPayload(t: ReturnType<typeof getTasks>[number]) {
   return {
@@ -46,6 +53,8 @@ function taskPayload(t: ReturnType<typeof getTasks>[number]) {
 }
 
 function errorResponse(error: unknown): Response {
+  const jsonError = requestJsonErrorResponse(error);
+  if (jsonError) return jsonError;
   if (error instanceof AssistantIdempotencyError) {
     return Response.json({ error: error.message }, { status: error.status });
   }
@@ -84,7 +93,13 @@ export async function POST(request: Request) {
   const auth = assistant ?? requireHermesToken(request);
   if (!auth) return Response.json({ error: "未授权" }, { status: 401 });
   try {
-    const input = await request.json();
+    const input = await parseJsonBody<TaskCreateRequest>(request, {
+      requireJsonContentType: Boolean(assistant),
+    });
+    const taskValidationError = validateTaskFields(input, { requireTitle: true });
+    if (taskValidationError) {
+      return Response.json({ error: taskValidationError }, { status: 400 });
+    }
     const title = (input.title ?? "").trim();
     if (!title) return Response.json({ error: "任务标题不能为空" }, { status: 400 });
     if (input.priority !== undefined && !isPriority(input.priority)) {
@@ -122,8 +137,15 @@ export async function PATCH(request: Request) {
   if (!auth) return Response.json({ error: "未授权" }, { status: 401 });
 
   try {
-    const input = await request.json();
-    if (typeof input.id !== "string") {
+    const input = await parseJsonBody<TaskUpdateRequest>(request, {
+      requireJsonContentType: Boolean(assistant),
+    });
+    const taskValidationError = validateTaskFields(input);
+    if (taskValidationError) {
+      return Response.json({ error: taskValidationError }, { status: 400 });
+    }
+    const taskId = input.id;
+    if (typeof taskId !== "string") {
       return Response.json({ error: "缺少任务 ID" }, { status: 400 });
     }
     if (assistant && input.done !== undefined) {
@@ -143,7 +165,7 @@ export async function PATCH(request: Request) {
     const update = () => {
       const updates = { ...input };
       if (assistant) delete updates.originSource;
-      const updated = updateTask(auth.userId, input.id, updates);
+      const updated = updateTask(auth.userId, taskId, updates);
       return updated
         ? { status: 200, body: taskPayload(updated) }
         : { status: 404, body: { error: "任务不存在" } };
@@ -159,22 +181,22 @@ export async function PATCH(request: Request) {
 }
 
 export async function DELETE(request: Request) {
-  const assistant = requireAssistantToken(request, "tasks:write");
-  const auth = assistant ?? requireHermesToken(request);
+  const forbidden = forbidAssistantDelete(request);
+  if (forbidden) return forbidden;
+
+  const auth = requireHermesToken(request);
   if (!auth) return Response.json({ error: "未授权" }, { status: 401 });
 
   try {
-    const input = await request.json();
-    if (typeof input.id !== "string") {
+    const input = await parseJsonBody<{ id?: unknown }>(request);
+    const taskId = input.id;
+    if (typeof taskId !== "string") {
       return Response.json({ error: "缺少任务 ID" }, { status: 400 });
     }
     const remove = () =>
-      deleteTask(auth.userId, input.id)
+      deleteTask(auth.userId, taskId)
         ? { status: 200, body: { ok: true } }
         : { status: 404, body: { error: "任务不存在" } };
-    if (assistant) {
-      return idempotentResponse(runAssistantMutation(request, assistant, input, remove));
-    }
     const result = remove();
     return Response.json(result.body, { status: result.status });
   } catch (error) {

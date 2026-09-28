@@ -5,7 +5,7 @@ import {
   updateTask,
 } from "@/lib/server-store";
 import { getUserFromRequest } from "@/lib/auth";
-import { isDateKey, isPriority } from "@/lib/validation";
+import { isDateKey, isPriority, validateTaskFields } from "@/lib/validation";
 
 export const runtime = "nodejs";
 
@@ -19,6 +19,10 @@ export async function POST(request: Request) {
   const auth = getUserFromRequest(request);
   if (!auth) return Response.json({ error: "未登录" }, { status: 401 });
   const input = await request.json();
+  const taskValidationError = validateTaskFields(input, { requireTitle: true });
+  if (taskValidationError) {
+    return Response.json({ error: taskValidationError }, { status: 400 });
+  }
   if (typeof input.title !== "string" || !input.title.trim()) {
     return Response.json({ error: "任务标题不能为空" }, { status: 400 });
   }
@@ -54,6 +58,10 @@ export async function PATCH(request: Request) {
   const auth = getUserFromRequest(request);
   if (!auth) return Response.json({ error: "未登录" }, { status: 401 });
   const input = await request.json();
+  const taskValidationError = validateTaskFields(input);
+  if (taskValidationError) {
+    return Response.json({ error: taskValidationError }, { status: 400 });
+  }
   if (typeof input.id !== "string") {
     return Response.json({ error: "缺少任务 ID" }, { status: 400 });
   }

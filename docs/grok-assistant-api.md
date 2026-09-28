@@ -14,13 +14,15 @@ V3.4 允许 Grok 等外部聊天助手读取 Time Planner 上下文、提出计�
 X-API-Token: <一次性显示的助手 Token>
 ```
 
-所有 POST、PATCH、DELETE 还必须带：
+所有允许的 POST、PATCH 写请求还必须带：
 
 ```text
 Idempotency-Key: <本次逻辑操作的唯一键，8-200 字符>
 ```
 
 网络重试时复用原键，会返回第一次的结果并附带 `Idempotency-Replayed: true`；同一键用于不同请求返回 `409`。
+
+助手写请求必须同时使用 `Content-Type: application/json`，并发送合法 JSON；否则返回 `400 {"error":"请求体必须是合法 JSON"}`。
 
 设置面板会显示最近五条外部写入记录（助手名称、方法、路径、状态码和时间），请求正文和 Token 不会写入审计列表。
 
@@ -32,7 +34,7 @@ Idempotency-Key: <本次逻辑操作的唯一键，8-200 字符>
 | `tasks:write` | 创建/更新任务，记录完成、部分完成、推迟和放弃 |
 | `plans:write` | 生成、调整和确认今日计划 |
 | `reviews:write` | 保存每日或每周复盘 |
-| `templates:write` | 保存、应用或删除流程模板 |
+| `templates:write` | 保存或应用流程模板 |
 
 缺少 Token、Token 错误、已撤销或缺少所需权限都返回 `401`。
 
@@ -48,6 +50,10 @@ GET /api/v1/assistant/context?from=2026-09-28&to=2026-10-04
 GET /api/v1/assistant/plans?date=2026-09-28
 GET /api/v1/assistant/handoff?date=2026-09-28&kind=morning
 GET /api/v1/assistant/handoff?date=2026-09-28&kind=evening
+GET /api/v1/smart-day?date=2026-09-28&kind=morning
+GET /api/v1/freebusy?from=2026-09-28&to=2026-10-04
+GET /api/v1/projects
+GET /api/v1/projects/:projectId
 ```
 
 早晨交接包含计划、当天任务、逾期、到期跟进和阻塞；晚上交接包含当天结果、未完成项、专注分钟和已保存日复盘。
@@ -60,8 +66,9 @@ GET /api/v1/assistant/handoff?date=2026-09-28&kind=evening
 GET    /api/v1/tasks
 POST   /api/v1/tasks
 PATCH  /api/v1/tasks
-DELETE /api/v1/tasks
 ```
+
+外部助手不能删除任务、项目、习惯、想法、阅读项、重复任务或流程模板；带有效助手 Token 的删除请求统一返回 `403`。放弃任务必须记录 `outcome=dropped`，保留历史依据。
 
 新增/更新字段：
 
@@ -82,6 +89,8 @@ DELETE /api/v1/tasks
 ```
 
 `executionState` 为 `active | waiting | blocked`；`taskLevel` 为 `milestone | task | action`。上级任务必须属于同一用户，并且在指定项目时必须属于同一项目。
+
+任务标题最多 200 个字符，描述最多 5000 个字符；下一步、完成标准、等待对象、阻塞原因和来源引用各最多 500 个字符。新增和更新共用同一套限制。
 
 ### 记录结果
 
@@ -110,12 +119,15 @@ POST /api/v1/assistant/tasks/:taskId/outcomes
   "date": "2026-09-28",
   "outcome": "postponed",
   "nextAction": "周五催一次",
+  "rescheduleDate": "2026-10-02",
   "waitingOn": "供应商报价",
   "followUpDate": "2026-10-02"
 }
 ```
 
-结果为 `done | partial | postponed | dropped`。`partial` 不会关闭任务；`dropped` 会保留任务和结果记录，不等同于删除。
+结果为 `done | partial | postponed | dropped`。`partial` 必须填写 `nextAction`，可继续安排在结果当天；`postponed` 必须填写 `nextAction` 和晚于结果日期的 `rescheduleDate`。`dropped` 会关闭任务但不计入完成数，仍保留在计划数和结果历史中。复盘统计同一任务同一天只采用最新一条结果，完整历史仍可查询。
+
+不存在或不属于当前用户的任务统一返回 `404 {"error":"任务不存在或不可访问"}`。
 
 ## 今日计划草稿
 
@@ -129,7 +141,9 @@ POST /api/v1/assistant/plans/drafts
 }
 ```
 
-生成草稿不会修改任务日期。调整计划项：
+显式传入 `taskIds` 时不能为空。生成草稿不会修改任务日期。已确认计划默认不能被新草稿覆盖，会返回 `409`；用户明确同意重排后可发送 `"replaceConfirmed": true`，旧确认版本会完整保存在 `GET /api/v1/assistant/plans?date=...` 的 `history` 中。
+
+调整计划项：
 
 ```text
 PATCH /api/v1/assistant/plans/items/:itemId
@@ -147,6 +161,8 @@ POST /api/v1/assistant/plans/:planId/confirm
 ```
 
 确认才会把未拒绝的计划项写入任务日期。
+
+拒绝或移动计划项后，计划摘要会按当前未拒绝项目的数量和真实分钟数重新计算。
 
 ## 复盘草稿与保存
 
@@ -209,6 +225,7 @@ POST /api/v1/assistant/workflows/:templateId/apply
 
 - 读取、生成草稿、生成复盘草稿：可直接执行。
 - 新增/修改任务、记录结果：先复述将写入的内容，再由用户确认。
-- 确认今日计划、批量应用模板、记录 `dropped`、删除：必须获得明确确认。
+- 确认今日计划、显式替换已确认计划、批量应用模板、记录 `dropped`：必须获得明确确认。
+- 删除不属于助手能力；即使用户要求，也改为记录 `dropped` 或请用户在网页端自行删除。
 
 可直接把 [`skills/grok-time-planner/SKILL.md`](../skills/grok-time-planner/SKILL.md) 的内容作为 Grok Bot 的行为说明。

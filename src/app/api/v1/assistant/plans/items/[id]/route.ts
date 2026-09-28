@@ -4,6 +4,7 @@ import {
   idempotentResponse,
   runAssistantMutation,
 } from "@/lib/assistant-idempotency";
+import { parseJsonBody, requestJsonErrorResponse } from "@/lib/request-json";
 import { smartDayErrorResponse, updateSmartDayItem } from "@/lib/smart-day-store";
 import type { SmartDayItemActionInput } from "@/lib/smart-day-types";
 
@@ -18,7 +19,9 @@ export async function PATCH(
   if (!auth) return Response.json({ error: "未授权" }, { status: 401 });
   try {
     const { id } = await params;
-    const input = (await request.json()) as SmartDayItemActionInput;
+    const input = await parseJsonBody<SmartDayItemActionInput>(request, {
+      requireJsonContentType: true,
+    });
     return idempotentResponse(
       runAssistantMutation(request, auth, input, () => ({
         status: 200,
@@ -26,6 +29,8 @@ export async function PATCH(
       }))
     );
   } catch (error) {
+    const jsonError = requestJsonErrorResponse(error);
+    if (jsonError) return jsonError;
     if (error instanceof AssistantIdempotencyError) {
       return Response.json({ error: error.message }, { status: error.status });
     }

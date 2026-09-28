@@ -1,4 +1,5 @@
 import { requireHermesToken } from "@/lib/hermes-auth";
+import { forbidAssistantDelete } from "@/lib/assistant-auth";
 import { getIdeas, createIdea, deleteIdea } from "@/lib/server-store";
 
 export const runtime = "nodejs";
@@ -18,6 +19,9 @@ export async function POST(request: Request) {
 }
 
 export async function DELETE(request: Request) {
+  const forbidden = forbidAssistantDelete(request);
+  if (forbidden) return forbidden;
+
   const auth = requireHermesToken(request);
   if (!auth) return Response.json({ error: "未授权" }, { status: 401 });
 

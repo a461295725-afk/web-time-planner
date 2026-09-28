@@ -1,4 +1,5 @@
 import { getFreebusyRange } from "@/lib/freebusy-store";
+import { requireAssistantToken } from "@/lib/assistant-auth";
 import { requireHermesToken } from "@/lib/hermes-auth";
 import { SmartDayError } from "@/lib/smart-day-store";
 
@@ -6,7 +7,8 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET(request: Request) {
-  const auth = requireHermesToken(request);
+  const auth =
+    requireAssistantToken(request, "context:read") ?? requireHermesToken(request);
   if (!auth) return Response.json({ error: "未授权" }, { status: 401 });
 
   try {

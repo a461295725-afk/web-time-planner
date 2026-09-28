@@ -49,3 +49,41 @@ export function validateDateInput(
   const parsed = parseDateKey(value);
   return parsed ? { ok: true, value: parsed } : { ok: false };
 }
+
+const TASK_TEXT_FIELDS = {
+  description: { label: "任务描述", maxLength: 5_000 },
+  nextAction: { label: "下一步", maxLength: 500 },
+  doneDefinition: { label: "完成标准", maxLength: 500 },
+  waitingOn: { label: "等待对象", maxLength: 500 },
+  blocker: { label: "阻塞原因", maxLength: 500 },
+  originRef: { label: "来源引用", maxLength: 500 },
+} as const;
+
+export function validateTaskFields(
+  input: unknown,
+  options: { requireTitle?: boolean } = {}
+): string | null {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    return "任务请求必须是对象";
+  }
+  const values = input as Record<string, unknown>;
+  const hasTitle = Object.prototype.hasOwnProperty.call(values, "title");
+  if (options.requireTitle || hasTitle) {
+    if (typeof values.title !== "string" || !values.title.trim()) {
+      return "任务标题不能为空";
+    }
+    if (values.title.trim().length > 200) {
+      return "任务标题不能超过 200 个字符";
+    }
+  }
+  for (const [field, rule] of Object.entries(TASK_TEXT_FIELDS)) {
+    if (!Object.prototype.hasOwnProperty.call(values, field)) continue;
+    const value = values[field];
+    if (value === undefined || value === null) continue;
+    if (typeof value !== "string") return `${rule.label}必须是文本`;
+    if (value.length > rule.maxLength) {
+      return `${rule.label}不能超过 ${rule.maxLength} 个字符`;
+    }
+  }
+  return null;
+}

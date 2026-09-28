@@ -118,6 +118,17 @@ export interface SmartDayDraftResult {
   unassignedTaskIds: string[];
   warnings: string[];
   usedAi: boolean;
+  previousConfirmedVersion?: number;
+}
+
+export interface SmartDayPlanRevision {
+  id: string;
+  planId: string;
+  date: string;
+  version: number;
+  snapshot: SmartDayPlan;
+  confirmedAt?: number;
+  archivedAt: number;
 }
 
 export interface SmartDayItemActionInput {

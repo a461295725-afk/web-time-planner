@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { sqlite } from "@/db";
 import { broadcastChange } from "@/lib/sse-manager";
 import { getTask } from "@/lib/server-store";
+import { todayKey } from "@/lib/date";
 import { isDateKey } from "@/lib/validation";
 
 export type TaskOutcomeKind = "done" | "partial" | "postponed" | "dropped";
@@ -14,6 +15,10 @@ export interface TaskOutcome {
   note: string;
   nextAction?: string;
   actualMinutes?: number;
+  rescheduleDate?: string;
+  waitingOn?: string;
+  followUpDate?: string;
+  blocker?: string;
   source: string;
   createdAt: number;
 }
@@ -30,12 +35,26 @@ type TaskOutcomeRow = {
   note: string;
   next_action: string | null;
   actual_minutes: number | null;
+  reschedule_date: string | null;
+  waiting_on: string | null;
+  follow_up_date: string | null;
+  blocker: string | null;
   source: string;
   created_at: number;
 };
 
-function invalid(message: string): never {
-  throw new Error(message);
+export class TaskExecutionError extends Error {
+  constructor(
+    message: string,
+    readonly status = 400
+  ) {
+    super(message);
+    this.name = "TaskExecutionError";
+  }
+}
+
+function invalid(message: string, status = 400): never {
+  throw new TaskExecutionError(message, status);
 }
 
 function cleanText(value: unknown, field: string, maxLength = 2_000): string {
@@ -55,6 +74,10 @@ function mapOutcome(row: TaskOutcomeRow): TaskOutcome {
     note: row.note,
     nextAction: row.next_action ?? undefined,
     actualMinutes: row.actual_minutes ?? undefined,
+    rescheduleDate: row.reschedule_date ?? undefined,
+    waitingOn: row.waiting_on ?? undefined,
+    followUpDate: row.follow_up_date ?? undefined,
+    blocker: row.blocker ?? undefined,
     source: row.source,
     createdAt: row.created_at,
   };
@@ -63,7 +86,8 @@ function mapOutcome(row: TaskOutcomeRow): TaskOutcome {
 function outcomeRow(userId: string, id: string): TaskOutcomeRow {
   return sqlite
     .prepare(
-      `SELECT id, task_id, date, outcome, note, next_action, actual_minutes, source, created_at
+      `SELECT id, task_id, date, outcome, note, next_action, actual_minutes,
+        reschedule_date, waiting_on, follow_up_date, blocker, source, created_at
        FROM task_outcomes WHERE id = ? AND user_id = ?`
     )
     .get(id, userId) as TaskOutcomeRow;
@@ -101,23 +125,40 @@ export function recordTaskOutcome(
   if (input.followUpDate !== undefined && !isDateKey(input.followUpDate)) {
     invalid("跟进日期无效");
   }
-  if (!getTask(userId, taskId)) invalid("任务不存在");
+  const note = cleanText(input.note, "结果说明");
+  const nextAction = cleanText(input.nextAction, "下一步", 500) || null;
+  const source = cleanText(input.source, "来源", 100) || "manual";
+  const waitingOn = cleanText(input.waitingOn, "等待对象", 500) || null;
+  const blocker = cleanText(input.blocker, "阻塞原因", 500) || null;
+  const rescheduleDate = input.rescheduleDate ?? null;
+  const followUpDate = input.followUpDate ?? null;
+  if (input.outcome === "partial" && !nextAction) invalid("部分完成必须填写下一步");
+  if (input.outcome === "postponed" && !nextAction) invalid("推迟任务必须填写下一步");
+  if (input.outcome === "postponed" && !rescheduleDate) {
+    invalid("推迟任务必须填写重新安排日期");
+  }
+  if (rescheduleDate) {
+    const today = todayKey();
+    const invalidPartialDate =
+      input.outcome === "partial" && (rescheduleDate < input.date || rescheduleDate < today);
+    const invalidPostponedDate =
+      input.outcome === "postponed" &&
+      (rescheduleDate <= input.date || rescheduleDate < today);
+    if (invalidPartialDate || invalidPostponedDate) {
+      invalid("重新安排日期必须晚于结果日期且不能早于今天");
+    }
+  }
+  if (!getTask(userId, taskId)) invalid("任务不存在或不可访问", 404);
 
   const result = sqlite.transaction(() => {
     const id = randomUUID();
     const timestamp = Date.now();
-    const note = cleanText(input.note, "结果说明");
-    const nextAction = cleanText(input.nextAction, "下一步", 500) || null;
-    const source = cleanText(input.source, "来源", 100) || "manual";
-    const waitingOn = cleanText(input.waitingOn, "等待对象", 500) || null;
-    const blocker = cleanText(input.blocker, "阻塞原因", 500) || null;
-    const rescheduleDate = input.rescheduleDate ?? null;
-    const followUpDate = input.followUpDate ?? null;
     sqlite
       .prepare(
         `INSERT INTO task_outcomes
-         (id, user_id, task_id, date, outcome, note, next_action, actual_minutes, source, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+         (id, user_id, task_id, date, outcome, note, next_action, actual_minutes,
+          reschedule_date, waiting_on, follow_up_date, blocker, source, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
         id,
@@ -128,6 +169,10 @@ export function recordTaskOutcome(
         note,
         nextAction,
         input.actualMinutes ?? null,
+        rescheduleDate,
+        waitingOn,
+        followUpDate,
+        blocker,
         source,
         timestamp
       );
@@ -198,25 +243,37 @@ export function listTaskOutcomesInRange(
   if (!isDateKey(from) || !isDateKey(to) || from > to) invalid("结果日期范围无效");
   const rows = sqlite
     .prepare(
-      `SELECT o.id, o.task_id, o.date, o.outcome, o.note, o.next_action,
-        o.actual_minutes, o.source, o.created_at, t.title AS task_title
-       FROM task_outcomes o
-       JOIN tasks t ON t.id = o.task_id AND t.user_id = o.user_id
-       WHERE o.user_id = ? AND o.date BETWEEN ? AND ?
-       ORDER BY o.date ASC, o.created_at ASC`
+      `WITH ranked AS (
+         SELECT o.id, o.task_id, o.date, o.outcome, o.note, o.next_action,
+           o.actual_minutes, o.reschedule_date, o.waiting_on, o.follow_up_date,
+           o.blocker, o.source, o.created_at, t.title AS task_title,
+           ROW_NUMBER() OVER (
+             PARTITION BY o.task_id, o.date
+             ORDER BY o.created_at DESC, o.rowid DESC
+           ) AS outcome_rank
+         FROM task_outcomes o
+         JOIN tasks t ON t.id = o.task_id AND t.user_id = o.user_id
+         WHERE o.user_id = ? AND o.date BETWEEN ? AND ?
+       )
+       SELECT id, task_id, date, outcome, note, next_action, actual_minutes,
+         reschedule_date, waiting_on, follow_up_date, blocker, source, created_at, task_title
+       FROM ranked
+       WHERE outcome_rank = 1
+       ORDER BY date ASC, created_at ASC`
     )
     .all(userId, from, to) as (TaskOutcomeRow & { task_title: string })[];
   return rows.map((row) => ({ ...mapOutcome(row), taskTitle: row.task_title }));
 }
 
 export function listTaskOutcomes(userId: string, taskId: string): TaskOutcome[] {
-  if (!getTask(userId, taskId)) return [];
+  if (!getTask(userId, taskId)) invalid("任务不存在或不可访问", 404);
   const rows = sqlite
     .prepare(
-      `SELECT id, task_id, date, outcome, note, next_action, actual_minutes, source, created_at
+      `SELECT id, task_id, date, outcome, note, next_action, actual_minutes,
+        reschedule_date, waiting_on, follow_up_date, blocker, source, created_at
        FROM task_outcomes
        WHERE user_id = ? AND task_id = ?
-       ORDER BY created_at DESC`
+       ORDER BY created_at DESC, rowid DESC`
     )
     .all(userId, taskId) as TaskOutcomeRow[];
   return rows.map(mapOutcome);

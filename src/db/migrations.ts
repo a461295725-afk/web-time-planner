@@ -4,7 +4,7 @@ import { hashHermesToken, hermesTokenLast4 } from "@/lib/hermes-token";
 
 type SqliteDatabase = Database.Database;
 
-const CURRENT_VERSION = 9;
+const CURRENT_VERSION = 10;
 
 function tableColumns(sqlite: SqliteDatabase, table: string): string[] {
   return (sqlite.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).map(
@@ -612,6 +612,34 @@ function createAssistantAuditTable(sqlite: SqliteDatabase): void {
   `);
 }
 
+function createV34AdversarialHardeningTables(sqlite: SqliteDatabase): void {
+  const outcomeColumns: [string, string][] = [
+    ["reschedule_date", "TEXT"],
+    ["waiting_on", "TEXT"],
+    ["follow_up_date", "TEXT"],
+    ["blocker", "TEXT"],
+  ];
+  for (const [column, definition] of outcomeColumns) {
+    addColumn(sqlite, "task_outcomes", column, definition);
+  }
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS day_plan_revisions (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id),
+      plan_id TEXT NOT NULL,
+      date TEXT NOT NULL,
+      version INTEGER NOT NULL,
+      snapshot_json TEXT NOT NULL,
+      confirmed_at INTEGER,
+      archived_at INTEGER NOT NULL
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_day_plan_revisions_plan_version
+      ON day_plan_revisions(user_id, plan_id, version);
+    CREATE INDEX IF NOT EXISTS idx_day_plan_revisions_user_date
+      ON day_plan_revisions(user_id, date, version DESC);
+  `);
+}
+
 function applyMigration(sqlite: SqliteDatabase, version: number): void {
   switch (version) {
     case 1: createBaseTables(sqlite); break;
@@ -623,6 +651,7 @@ function applyMigration(sqlite: SqliteDatabase, version: number): void {
     case 7: createV3PlanningTables(sqlite); break;
     case 8: createV34GrokCollaborationTables(sqlite); break;
     case 9: createAssistantAuditTable(sqlite); break;
+    case 10: createV34AdversarialHardeningTables(sqlite); break;
     default: throw new Error(`未知数据库迁移版本：${version}`);
   }
 }

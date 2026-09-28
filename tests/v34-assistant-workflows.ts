@@ -90,6 +90,7 @@ async function main(): Promise<void> {
             date: "2026-09-28",
             outcome: "postponed",
             nextAction: "周五催一次",
+            rescheduleDate: "2026-10-02",
             waitingOn: "供应商报价",
             followUpDate: "2026-10-02",
           },
