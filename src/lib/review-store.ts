@@ -68,8 +68,11 @@ type HabitCountRow = { date: string; count: number };
 type FocusCountRow = { date: string; seconds: number | null };
 type CarryoverCountRow = { source_date: string; count: number };
 type LatestOutcomeCountRow = {
+  task_id: string;
   date: string;
   outcome: "done" | "partial" | "postponed" | "dropped";
+  scheduled_date_snapshot: string | null;
+  estimated_minutes_snapshot: number | null;
 };
 
 const CHINA_TIME_ZONE = "Asia/Shanghai";
@@ -288,6 +291,55 @@ export function getReviewStats(userId: string, requestedFrom: string, requestedT
     })
   );
 
+  const latestOutcomeRows = sqlite
+    .prepare(
+      `WITH ranked AS (
+         SELECT task_id, date, outcome, scheduled_date_snapshot, estimated_minutes_snapshot,
+           ROW_NUMBER() OVER (
+             PARTITION BY task_id, date
+             ORDER BY created_at DESC, rowid DESC
+           ) AS outcome_rank
+         FROM task_outcomes
+         WHERE user_id = ?
+           AND (date BETWEEN ? AND ? OR scheduled_date_snapshot BETWEEN ? AND ?)
+       )
+       SELECT task_id, date, outcome, scheduled_date_snapshot, estimated_minutes_snapshot
+       FROM ranked WHERE outcome_rank = 1`
+    )
+    .all(userId, from, to, from, to) as LatestOutcomeCountRow[];
+  const outcomeByTaskDate = new Map<string, LatestOutcomeCountRow>(
+    latestOutcomeRows.map((row) => [`${row.task_id}:${row.date}`, row])
+  );
+  const plannedByTaskDate = new Map<
+    string,
+    { date: string; estimatedMinutes: number; done: boolean }
+  >();
+  for (const row of latestOutcomeRows) {
+    const metrics = metricsByDate.get(row.date);
+    if (metrics) {
+      if (row.outcome === "done") metrics.completedCount += 1;
+      if (row.outcome === "dropped") metrics.droppedCount += 1;
+      if (row.outcome === "partial") metrics.partialCount += 1;
+      if (row.outcome === "postponed") metrics.postponedCount += 1;
+    }
+    if (
+      row.scheduled_date_snapshot &&
+      row.scheduled_date_snapshot >= from &&
+      row.scheduled_date_snapshot <= to
+    ) {
+      const key = `${row.task_id}:${row.scheduled_date_snapshot}`;
+      const existing = plannedByTaskDate.get(key);
+      plannedByTaskDate.set(key, {
+        date: row.scheduled_date_snapshot,
+        estimatedMinutes:
+          existing?.estimatedMinutes ?? Math.max(0, row.estimated_minutes_snapshot ?? 0),
+        done:
+          Boolean(existing?.done) ||
+          (row.date === row.scheduled_date_snapshot && row.outcome === "done"),
+      });
+    }
+  }
+
   const tasks = sqlite
     .prepare(
       `SELECT id, scheduled_date, status, estimated_minutes, completed_at, completion_outcome
@@ -299,40 +351,31 @@ export function getReviewStats(userId: string, requestedFrom: string, requestedT
 
   for (const task of tasks) {
     if (task.scheduled_date && metricsByDate.has(task.scheduled_date)) {
-      const metrics = metricsByDate.get(task.scheduled_date)!;
-      metrics.plannedCount += 1;
-      if (task.status === "done" && task.completion_outcome !== "dropped") {
-        metrics.plannedDoneCount += 1;
+      const key = `${task.id}:${task.scheduled_date}`;
+      const sameDayOutcome = outcomeByTaskDate.get(key);
+      if (!plannedByTaskDate.has(key)) {
+        plannedByTaskDate.set(key, {
+          date: task.scheduled_date,
+          estimatedMinutes: Math.max(0, task.estimated_minutes ?? 0),
+          done:
+            sameDayOutcome?.outcome === "done" ||
+            (!sameDayOutcome && task.status === "done" && task.completion_outcome === null),
+        });
       }
-      metrics.plannedMinutes += task.estimated_minutes ?? 0;
     }
-    if (task.completed_at !== null && task.completion_outcome !== "dropped") {
+    if (task.completed_at !== null && task.completion_outcome === null) {
       const completedDate = dateFromTimestamp(task.completed_at);
       const metrics = metricsByDate.get(completedDate);
       if (metrics) metrics.completedCount += 1;
     }
   }
 
-  const latestOutcomeRows = sqlite
-    .prepare(
-      `WITH ranked AS (
-         SELECT date, outcome,
-           ROW_NUMBER() OVER (
-             PARTITION BY task_id, date
-             ORDER BY created_at DESC, rowid DESC
-           ) AS outcome_rank
-         FROM task_outcomes
-         WHERE user_id = ? AND date BETWEEN ? AND ?
-       )
-       SELECT date, outcome FROM ranked WHERE outcome_rank = 1`
-    )
-    .all(userId, from, to) as LatestOutcomeCountRow[];
-  for (const row of latestOutcomeRows) {
-    const metrics = metricsByDate.get(row.date);
+  for (const planned of plannedByTaskDate.values()) {
+    const metrics = metricsByDate.get(planned.date);
     if (!metrics) continue;
-    if (row.outcome === "dropped") metrics.droppedCount += 1;
-    if (row.outcome === "partial") metrics.partialCount += 1;
-    if (row.outcome === "postponed") metrics.postponedCount += 1;
+    metrics.plannedCount += 1;
+    metrics.plannedMinutes += planned.estimatedMinutes;
+    if (planned.done) metrics.plannedDoneCount += 1;
   }
 
   const focusRows = sqlite

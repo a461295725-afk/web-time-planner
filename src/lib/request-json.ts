@@ -1,8 +1,8 @@
 export class RequestJsonError extends Error {
   readonly status = 400;
 
-  constructor() {
-    super("请求体必须是合法 JSON");
+  constructor(message = "请求体必须是合法 JSON") {
+    super(message);
     this.name = "RequestJsonError";
   }
 }
@@ -22,11 +22,16 @@ export async function parseJsonBody<T = Record<string, unknown>>(
     }
   }
 
+  let value: unknown;
   try {
-    return (await request.json()) as T;
+    value = await request.json();
   } catch {
     throw new RequestJsonError();
   }
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    throw new RequestJsonError("请求体必须是 JSON 对象");
+  }
+  return value as T;
 }
 
 export function requestJsonErrorResponse(error: unknown): Response | null {

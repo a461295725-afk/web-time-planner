@@ -20,9 +20,9 @@ X-API-Token: <一次性显示的助手 Token>
 Idempotency-Key: <本次逻辑操作的唯一键，8-200 字符>
 ```
 
-网络重试时复用原键，会返回第一次的结果并附带 `Idempotency-Replayed: true`；同一键用于不同请求返回 `409`。
+网络重试时复用原键，会返回第一次的结果并附带 `Idempotency-Replayed: true`；同一键用于不同请求返回 `409`。并发到达的同一请求只执行一次，尚未完成的副本返回 `409` 和“同一请求正在处理中”；客户端应稍后复用原键重试，不能换新键重复写入。
 
-助手写请求必须同时使用 `Content-Type: application/json`，并发送合法 JSON；否则返回 `400 {"error":"请求体必须是合法 JSON"}`。
+助手写请求必须同时使用 `Content-Type: application/json`，且 JSON 顶层必须是对象。缺少或错误的内容类型、非法 JSON、`null`、数组或基础类型均返回 `400`。
 
 设置面板会显示最近五条外部写入记录（助手名称、方法、路径、状态码和时间），请求正文和 Token 不会写入审计列表。
 
@@ -125,7 +125,9 @@ POST /api/v1/assistant/tasks/:taskId/outcomes
 }
 ```
 
-结果为 `done | partial | postponed | dropped`。`partial` 必须填写 `nextAction`，可继续安排在结果当天；`postponed` 必须填写 `nextAction` 和晚于结果日期的 `rescheduleDate`。`dropped` 会关闭任务但不计入完成数，仍保留在计划数和结果历史中。复盘统计同一任务同一天只采用最新一条结果，完整历史仍可查询。
+结果为 `done | partial | postponed | dropped`。结果日期只能是今天或过去，不能预先填写未来结果。`partial` 必须填写 `nextAction`，可继续安排在结果当天；`postponed` 必须填写 `nextAction` 和晚于结果日期的 `rescheduleDate`。`dropped` 会关闭任务但不计入完成数，仍保留在计划数和结果历史中。
+
+每条结果会保存记录当时的计划日期和预估时长快照。复盘统计同一任务同一天只采用最新一条结果，并优先使用历史事件和快照；任务后来被重新打开或改期，不会改写过去的计划数、计划内完成数和完成数。完整结果历史仍可查询。
 
 不存在或不属于当前用户的任务统一返回 `404 {"error":"任务不存在或不可访问"}`。
 
@@ -143,6 +145,8 @@ POST /api/v1/assistant/plans/drafts
 
 显式传入 `taskIds` 时不能为空。生成草稿不会修改任务日期。已确认计划默认不能被新草稿覆盖，会返回 `409`；用户明确同意重排后可发送 `"replaceConfirmed": true`，旧确认版本会完整保存在 `GET /api/v1/assistant/plans?date=...` 的 `history` 中。
 
+只有省略 `date` 才默认今天；若显式传入非字符串、空值或不合法日期，返回 `400`，不会静默改为今天。
+
 调整计划项：
 
 ```text
@@ -152,6 +156,8 @@ PATCH /api/v1/assistant/plans/items/:itemId
 {"action":"reject"}
 {"action":"move","block":"afternoon","startMinute":810,"endMinute":870}
 ```
+
+若提供 `position`，必须是非负安全整数；非法值返回 `400`。
 
 用户明确确认后：
 
@@ -220,6 +226,8 @@ POST /api/v1/assistant/workflows/:templateId/apply
 ```
 
 每次应用都会创建新的任务记录，并写入模板、应用批次和步骤来源。候选接口只返回建议，不会自动保存或应用。
+
+不存在或不属于当前用户的模板、目标项目统一返回租户安全的 `404`，不会区分“确实不存在”和“属于其他用户”。
 
 ## 推荐的确认边界
 

@@ -865,6 +865,12 @@ export function updateSmartDayItem(
   input: SmartDayItemActionInput
 ): SmartDayPlanItem {
   if (!["accept", "reject", "move"].includes(input.action)) throw new SmartDayError("计划操作无效");
+  if (
+    input.position !== undefined &&
+    (!Number.isSafeInteger(input.position) || input.position < 0)
+  ) {
+    throw new SmartDayError("计划项位置无效");
+  }
   const item = itemRow(userId, itemId);
   if (!item) throw new SmartDayError("计划项不存在", 404);
   const plan = planRow(userId, item.plan_id);

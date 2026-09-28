@@ -4,7 +4,7 @@ import { hashHermesToken, hermesTokenLast4 } from "@/lib/hermes-token";
 
 type SqliteDatabase = Database.Database;
 
-const CURRENT_VERSION = 10;
+const CURRENT_VERSION = 11;
 
 function tableColumns(sqlite: SqliteDatabase, table: string): string[] {
   return (sqlite.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).map(
@@ -640,6 +640,29 @@ function createV34AdversarialHardeningTables(sqlite: SqliteDatabase): void {
   `);
 }
 
+function createOutcomeReviewSnapshots(sqlite: SqliteDatabase): void {
+  const outcomeColumns: [string, string][] = [
+    ["scheduled_date_snapshot", "TEXT"],
+    ["estimated_minutes_snapshot", "INTEGER"],
+  ];
+  for (const [column, definition] of outcomeColumns) {
+    addColumn(sqlite, "task_outcomes", column, definition);
+  }
+  sqlite.exec(`
+    UPDATE task_outcomes
+    SET scheduled_date_snapshot = (
+      SELECT scheduled_date FROM tasks WHERE tasks.id = task_outcomes.task_id
+    )
+    WHERE scheduled_date_snapshot IS NULL;
+
+    UPDATE task_outcomes
+    SET estimated_minutes_snapshot = (
+      SELECT estimated_minutes FROM tasks WHERE tasks.id = task_outcomes.task_id
+    )
+    WHERE estimated_minutes_snapshot IS NULL;
+  `);
+}
+
 function applyMigration(sqlite: SqliteDatabase, version: number): void {
   switch (version) {
     case 1: createBaseTables(sqlite); break;
@@ -652,6 +675,7 @@ function applyMigration(sqlite: SqliteDatabase, version: number): void {
     case 8: createV34GrokCollaborationTables(sqlite); break;
     case 9: createAssistantAuditTable(sqlite); break;
     case 10: createV34AdversarialHardeningTables(sqlite); break;
+    case 11: createOutcomeReviewSnapshots(sqlite); break;
     default: throw new Error(`未知数据库迁移版本：${version}`);
   }
 }

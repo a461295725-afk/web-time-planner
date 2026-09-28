@@ -86,6 +86,8 @@ const tests: TestCase[] = [
           "waiting_on",
           "follow_up_date",
           "blocker",
+          "scheduled_date_snapshot",
+          "estimated_minutes_snapshot",
         ]) {
           assert(outcomeColumns.has(column), `task_outcomes.${column} should exist`);
         }
@@ -99,7 +101,7 @@ const tests: TestCase[] = [
         );
         assert(revisionIndexes.has("idx_day_plan_revisions_plan_version"));
         assert(revisionIndexes.has("idx_day_plan_revisions_user_date"));
-        assert.equal(migrationVersion(), 10);
+        assert.equal(migrationVersion(), 11);
       } finally {
         database.close();
         rmSync(path, { force: true });

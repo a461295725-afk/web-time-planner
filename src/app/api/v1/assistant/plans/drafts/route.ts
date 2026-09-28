@@ -7,6 +7,7 @@ import {
 import { todayKey } from "@/lib/date";
 import { parseJsonBody, requestJsonErrorResponse } from "@/lib/request-json";
 import { createDayPlanDraft, smartDayErrorResponse } from "@/lib/smart-day-store";
+import { isDateKey } from "@/lib/validation";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -18,6 +19,9 @@ export async function POST(request: Request) {
     const input = await parseJsonBody<Record<string, unknown>>(request, {
       requireJsonContentType: true,
     });
+    if (input.date !== undefined && !isDateKey(input.date)) {
+      return Response.json({ error: "date 日期无效" }, { status: 400 });
+    }
     if (
       input.taskIds !== undefined &&
       (!Array.isArray(input.taskIds) || input.taskIds.some((id) => typeof id !== "string"))
@@ -34,7 +38,7 @@ export async function POST(request: Request) {
       status: 201,
       body: await createDayPlanDraft(
         auth.userId,
-        typeof input.date === "string" ? input.date : todayKey(),
+        input.date === undefined ? todayKey() : (input.date as string),
         {
           taskIds: input.taskIds as string[] | undefined,
           useAi: input.useAi as boolean | undefined,

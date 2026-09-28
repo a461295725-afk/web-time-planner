@@ -5,7 +5,10 @@ import {
   runAssistantMutation,
 } from "@/lib/assistant-idempotency";
 import { parseJsonBody, requestJsonErrorResponse } from "@/lib/request-json";
-import { applyWorkflowTemplate } from "@/lib/workflow-template-store";
+import {
+  applyWorkflowTemplate,
+  WorkflowTemplateError,
+} from "@/lib/workflow-template-store";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -31,6 +34,9 @@ export async function POST(
     const jsonError = requestJsonErrorResponse(error);
     if (jsonError) return jsonError;
     if (error instanceof AssistantIdempotencyError) {
+      return Response.json({ error: error.message }, { status: error.status });
+    }
+    if (error instanceof WorkflowTemplateError) {
       return Response.json({ error: error.message }, { status: error.status });
     }
     return Response.json(

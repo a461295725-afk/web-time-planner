@@ -9,7 +9,7 @@
     "db:init": "npx tsx src/db/init.ts",
     "db:migrate": "npx tsx scripts/migrate.mjs",
     "db:claim-legacy": "npx tsx scripts/claim-legacy.mjs",
-    "test": "tsx tests/run.ts && tsx tests/v31-capture-search.ts && tsx tests/v32-smart-day.ts && tsx tests/v33-review.ts && tsx tests/integration-v3.ts && tsx tests/v34-grok-collaboration.ts && tsx tests/v34-assistant-workflows.ts && tsx tests/v34-adversarial-hardening.ts"
+    "test": "tsx tests/run.ts && tsx tests/v31-capture-search.ts && tsx tests/v32-smart-day.ts && tsx tests/v33-review.ts && tsx tests/integration-v3.ts && tsx tests/v34-grok-collaboration.ts && tsx tests/v34-assistant-workflows.ts && tsx tests/v34-adversarial-hardening.ts && tsx tests/v34-adversarial-round2.ts"
   },
   "dependencies": {
     "@tailwindcss/postcss": "^4",

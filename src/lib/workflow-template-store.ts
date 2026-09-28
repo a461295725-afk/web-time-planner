@@ -37,8 +37,18 @@ type WorkflowRow = {
   updated_at: number;
 };
 
-function invalid(message: string): never {
-  throw new Error(message);
+export class WorkflowTemplateError extends Error {
+  constructor(
+    message: string,
+    readonly status = 400
+  ) {
+    super(message);
+    this.name = "WorkflowTemplateError";
+  }
+}
+
+function invalid(message: string, status = 400): never {
+  throw new WorkflowTemplateError(message, status);
 }
 
 function cleanText(value: unknown, field: string, maxLength: number): string {
@@ -186,9 +196,9 @@ export function applyWorkflowTemplate(
   input: { projectId?: unknown; scheduledDate?: unknown }
 ): { template: WorkflowTemplate; applicationId: string; tasks: TaskItem[] } {
   const template = getWorkflowTemplate(userId, id);
-  if (!template) invalid("流程模板不存在");
+  if (!template) invalid("流程模板不存在或不可访问", 404);
   const projectId = cleanText(input.projectId, "项目 ID", 100) || undefined;
-  if (projectId && !getProject(userId, projectId)) invalid("项目不存在");
+  if (projectId && !getProject(userId, projectId)) invalid("项目不存在或不可访问", 404);
   const scheduledDate = cleanText(input.scheduledDate, "安排日期", 10) || undefined;
   if (scheduledDate && !isDateKey(scheduledDate)) invalid("安排日期无效");
 
@@ -251,4 +261,3 @@ export function suggestWorkflowCandidates(userId: string) {
     })
     .filter((candidate): candidate is NonNullable<typeof candidate> => Boolean(candidate));
 }
-

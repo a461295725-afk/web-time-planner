@@ -189,9 +189,11 @@ async function main(): Promise<void> {
     );
     console.log("PASS explicit replacement preserves the confirmed plan history");
 
+    const outcomeDate = todayKey();
+    const tomorrow = shiftDate(outcomeDate, 1);
     const droppedTask = createTask("user-a", {
       title: "决定不再继续的任务",
-      scheduledDate: "2026-10-06",
+      scheduledDate: outcomeDate,
       estimatedMinutes: 45,
     });
     const droppedResponse = await outcomeRoute.POST(
@@ -199,7 +201,7 @@ async function main(): Promise<void> {
         `http://local/api/v1/assistant/tasks/${droppedTask.id}/outcomes`,
         issued.token,
         "POST",
-        { date: "2026-10-06", outcome: "dropped", note: "优先级已经改变" },
+        { date: outcomeDate, outcome: "dropped", note: "优先级已经改变" },
         "dropped-is-not-done"
       ),
       { params: Promise.resolve({ id: droppedTask.id }) }
@@ -213,7 +215,7 @@ async function main(): Promise<void> {
 
     const droppedReviewResponse = await reviewDraftRoute.GET(
       assistantRequest(
-        "http://local/api/v1/assistant/review-draft?periodType=daily&periodStart=2026-10-06",
+        `http://local/api/v1/assistant/review-draft?periodType=daily&periodStart=${outcomeDate}`,
         issued.token
       )
     );
@@ -234,8 +236,6 @@ async function main(): Promise<void> {
     assert.equal(droppedReview.facts.droppedCount, 1);
     console.log("PASS dropped closes a task without counting it as completed");
 
-    const outcomeDate = todayKey();
-    const tomorrow = shiftDate(outcomeDate, 1);
     const validationTask = createTask("user-a", {
       title: "验证执行结果规则",
       scheduledDate: outcomeDate,

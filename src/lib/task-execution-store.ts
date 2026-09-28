@@ -148,7 +148,9 @@ export function recordTaskOutcome(
       invalid("重新安排日期必须晚于结果日期且不能早于今天");
     }
   }
-  if (!getTask(userId, taskId)) invalid("任务不存在或不可访问", 404);
+  const taskBeforeOutcome = getTask(userId, taskId);
+  if (!taskBeforeOutcome) invalid("任务不存在或不可访问", 404);
+  if (input.date > todayKey()) invalid("结果日期不能晚于今天");
 
   const result = sqlite.transaction(() => {
     const id = randomUUID();
@@ -157,8 +159,9 @@ export function recordTaskOutcome(
       .prepare(
         `INSERT INTO task_outcomes
          (id, user_id, task_id, date, outcome, note, next_action, actual_minutes,
-          reschedule_date, waiting_on, follow_up_date, blocker, source, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          reschedule_date, waiting_on, follow_up_date, blocker,
+          scheduled_date_snapshot, estimated_minutes_snapshot, source, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
         id,
@@ -173,6 +176,8 @@ export function recordTaskOutcome(
         waitingOn,
         followUpDate,
         blocker,
+        taskBeforeOutcome.scheduledDate ?? null,
+        taskBeforeOutcome.estimatedMinutes ?? null,
         source,
         timestamp
       );

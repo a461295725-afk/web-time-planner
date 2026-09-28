@@ -469,6 +469,8 @@ export const taskOutcomes = sqliteTable(
     waitingOn: text("waiting_on"),
     followUpDate: text("follow_up_date"),
     blocker: text("blocker"),
+    scheduledDateSnapshot: text("scheduled_date_snapshot"),
+    estimatedMinutesSnapshot: integer("estimated_minutes_snapshot"),
     source: text("source").notNull().default("manual"),
     createdAt: integer("created_at").notNull(),
   },
